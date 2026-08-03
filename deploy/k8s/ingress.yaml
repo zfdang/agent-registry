@@ -1,0 +1,88 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-https
+  namespace: agent-registry
+  labels:
+    app.kubernetes.io/part-of: agent-registry
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: registry-tls
+  namespace: agent-registry
+  labels:
+    app.kubernetes.io/part-of: agent-registry
+spec:
+  secretName: registry-tls
+  dnsNames:
+    - registry.ip402.xyz
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-http01
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agent-registry
+  namespace: agent-registry
+  labels:
+    app.kubernetes.io/part-of: agent-registry
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: agent-registry-redirect-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: registry.ip402.xyz
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: registry-api
+                port:
+                  number: 8080
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: registry-api
+                port:
+                  number: 8080
+          - path: /a2a
+            pathType: Prefix
+            backend:
+              service:
+                name: registry-api
+                port:
+                  number: 8080
+          - path: /.well-known
+            pathType: Prefix
+            backend:
+              service:
+                name: registry-api
+                port:
+                  number: 8080
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: registry-api
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: registry-web
+                port:
+                  number: 3000
+  tls:
+    - hosts:
+        - registry.ip402.xyz
+      secretName: registry-tls

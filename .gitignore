@@ -1,0 +1,20 @@
+# OMC / tooling runtime state — never commit
+.omc/
+
+# build outputs
+bin/
+web/dist/
+web/node_modules/
+
+# operator-local deploy config (node list, kubeconfigs, secrets)
+deploy/nodes.local
+*.local
+*.pem
+*.key
+.env
+.env.*
+
+# editor/os noise
+.DS_Store
+.idea/
+.vscode/
