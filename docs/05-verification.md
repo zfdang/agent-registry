@@ -46,8 +46,9 @@ Static validity requires, per the A2A card schema:
   legacy top-level `url` — see below)
 
 L1 is also the **extraction point** for every card-derived listing field:
-`name`, `description`, `skills`, `capabilities`, and `provider.organization`
-(→ `owner_name`). The submitter types none of these; the card is the sole
+`name`, `description`, `skills`, `capabilities`, `provider.organization`
+(→ `owner_name`), the card's own `version`, and the declared A2A
+`protocol_version`. The submitter types none of these; the card is the sole
 source (the declared agent ID is extracted by L2).
 
 **The service endpoint comes from one of two places**, since A2A v1.0 dropped

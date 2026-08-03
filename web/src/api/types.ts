@@ -25,6 +25,12 @@ export interface Agent {
   url: string
   description: string | null
   skills: Skill[]
+  // The agent's own version, e.g. "2.0.0"; null when the card doesn't declare one.
+  version: string | null
+  // Declared A2A protocol version, e.g. "1.0". Null is meaningful — it means
+  // the card has no `supportedInterfaces` (the pre-1.0 card format), not
+  // that the field is missing.
+  protocol_version: string | null
   verification_status: VerificationStatus
   verified_at: string | null
   created_at: string
@@ -86,6 +92,8 @@ export interface ExtractedAgent {
   agent_id: string | null
   description: string | null
   skills: Skill[]
+  version: string | null
+  protocol_version: string | null
 }
 
 export interface ValidateResponse {

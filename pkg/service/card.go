@@ -85,6 +85,28 @@ func (c *CardSchema) ProtocolVersion() string {
 	return ""
 }
 
+// Version returns the card's own top-level version (the agent's release
+// version, not the protocol's), nil when the card omits it (03).
+func (c *CardSchema) Version() *string {
+	if c.Card.Version == "" {
+		return nil
+	}
+	v := c.Card.Version
+	return &v
+}
+
+// ProtocolVersionPtr is ProtocolVersion() in the nullable form stored on the
+// agent row and exposed on the wire: nil when the card declares no
+// supportedInterfaces at all, which is itself the signal that the card is in
+// the pre-1.0 format (03).
+func (c *CardSchema) ProtocolVersionPtr() *string {
+	if pv := c.ProtocolVersion(); pv != "" {
+		v := pv
+		return &v
+	}
+	return nil
+}
+
 // OwnerName extracts provider.organization, nil when absent (03, 05 §L1).
 func (c *CardSchema) OwnerName() *string {
 	if c.Card.Provider != nil && c.Card.Provider.Org != "" {

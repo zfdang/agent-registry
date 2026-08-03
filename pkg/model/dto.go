@@ -24,6 +24,8 @@ type AgentListItem struct {
 	AgentID            *string    `json:"agent_id"`
 	URL                string     `json:"url"`
 	Description        string     `json:"description"`
+	Version            *string    `json:"version"`
+	ProtocolVersion    *string    `json:"protocol_version"`
 	Skills             []Skill    `json:"skills"`
 	VerificationStatus string     `json:"verification_status"`
 	VerifiedAt         *time.Time `json:"verified_at"`
@@ -92,11 +94,13 @@ type ValidateRequest struct {
 
 // ExtractedCard is the card-derived preview returned by validate.
 type ExtractedCard struct {
-	Name        string  `json:"name"`
-	OwnerName   *string `json:"owner_name"`
-	AgentID     *string `json:"agent_id"`
-	Description string  `json:"description"`
-	Skills      []Skill `json:"skills"`
+	Name            string  `json:"name"`
+	OwnerName       *string `json:"owner_name"`
+	AgentID         *string `json:"agent_id"`
+	Description     string  `json:"description"`
+	Version         *string `json:"version"`
+	ProtocolVersion *string `json:"protocol_version"`
+	Skills          []Skill `json:"skills"`
 }
 
 // ValidateResponse is POST /v1/agents/validate.

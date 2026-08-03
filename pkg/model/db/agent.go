@@ -22,6 +22,8 @@ type Agent struct {
 	AgentID            *string         `gorm:"column:agent_id;type:text;index:idx_agents_agent_id"`
 	URL                string          `gorm:"column:url;type:text;not null;uniqueIndex:idx_agents_url_unique"`
 	Description        string          `gorm:"column:description;type:text"`
+	Version            *string         `gorm:"column:version;type:text"`
+	ProtocolVersion    *string         `gorm:"column:protocol_version;type:text"`
 	Skills             json.RawMessage `gorm:"column:skills;type:jsonb;default:'[]'"`
 	Capabilities       json.RawMessage `gorm:"column:capabilities;type:jsonb;default:'{}'"`
 	CardURL            string          `gorm:"column:card_url;type:text"`

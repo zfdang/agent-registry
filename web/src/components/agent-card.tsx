@@ -3,6 +3,7 @@ import type { Agent } from '../api/types'
 import { agentDetailHref } from '../lib/agent-ref'
 import { formatDate } from '../lib/format-date'
 import { VerificationBadge } from './verification/status-badge'
+import { AgentMetaChips } from './agent-meta-chips'
 import { Card } from './ui/card'
 import { Badge } from './ui/badge'
 
@@ -35,9 +36,12 @@ export function AgentCard({ agent }: { agent: Agent }) {
             {extraCount > 0 && <Badge tone="gray">+{extraCount} more</Badge>}
           </div>
         )}
-        <p className="mt-auto pt-2 text-xs text-slate-400 dark:text-slate-500">
-          registered {formatDate(agent.created_at)}
-        </p>
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-2">
+          <AgentMetaChips version={agent.version} protocolVersion={agent.protocol_version} />
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            registered {formatDate(agent.created_at)}
+          </p>
+        </div>
       </Card>
     </Link>
   )

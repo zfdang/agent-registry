@@ -36,6 +36,8 @@ One row per listed agent.
 | `agent_id` | text | nullable | **The ID the card declares** (see 05 §L2 for the accepted locations); null when the card declares none. **Not unique** — see identity anchor above |
 | `url` | text | not null, **unique** | https base URL where the card was discovered — **the registry's identity anchor** |
 | `description` | text | | From the agent card |
+| `version` | text | nullable | **The card's own `version`** — the agent's release version, not the protocol's |
+| `protocol_version` | text | nullable | **The A2A protocol version declared** by the `supportedInterfaces` entry we selected. Null means the card declares no `supportedInterfaces` at all, which is itself the signal that it uses the pre-1.0 card format |
 | `skills` | jsonb | default `[]` | `[{id, name, description}]`, extracted from the card |
 | `capabilities` | jsonb | default `{}` | Card `capabilities` object (streaming, push, extensions) |
 | `card_url` | text | | Exact URL the winning card was fetched from (latest) |
