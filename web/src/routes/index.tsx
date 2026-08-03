@@ -11,7 +11,9 @@ import { Skeleton } from '../components/ui/skeleton'
 import { ErrorBanner } from '../components/ui/error-banner'
 import { buttonClasses } from '../components/ui/button'
 
-const PAGE_SIZE = 20
+// 18 fills the browse grid evenly in both layouts (3-col desktop → 6 rows,
+// 2-col tablet → 9 rows); the API default of 20 leaves a ragged last row.
+const PAGE_SIZE = 18
 
 type IndexSearch = {
   q?: string

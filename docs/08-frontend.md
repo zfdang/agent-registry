@@ -59,7 +59,9 @@ page.
 
 ### Pagination
 
-Classic pager (`page`/`page_size=20` params) rather than infinite scroll —
+Classic pager (`page`/`page_size=18` params — 18 fills the 3-column grid
+in whole rows, where the API's default 20 would leave a ragged one) rather
+than infinite scroll —
 the URL stays addressable and total count is already returned. Show
 `total` ("1,240 agents") next to the pager.
 
