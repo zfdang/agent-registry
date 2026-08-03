@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
 
-const PRE_1_0_TITLE = 'card uses the pre-1.0 format (no supportedInterfaces)'
+const UNDECLARED_TITLE = 'card declares no A2A protocol version (pre-1.0 format)'
 
 /**
  * Small, muted "vX.Y.Z" / "A2A x.y" chips — metadata, deliberately subordinate
  * to the (colored) skill chips. `protocol_version: null` is meaningful (the
- * card predates `supportedInterfaces`) so it always renders as "A2A 0.x"
+ * card declares no version anywhere — a pre-1.0 card that also omits the
+ * legacy top-level `protocolVersion`) so it always renders as "A2A 0.x"
  * rather than being hidden; `version: null` is genuinely absent data, so
  * that chip is simply omitted.
  */
@@ -20,7 +21,7 @@ export function AgentMetaChips({
     <div className="flex flex-wrap items-center gap-1.5">
       {version && <MetaChip>v{version}</MetaChip>}
       {protocolVersion === null ? (
-        <MetaChip title={PRE_1_0_TITLE}>A2A 0.x</MetaChip>
+        <MetaChip title={UNDECLARED_TITLE}>A2A 0.x</MetaChip>
       ) : (
         <MetaChip>A2A {protocolVersion}</MetaChip>
       )}

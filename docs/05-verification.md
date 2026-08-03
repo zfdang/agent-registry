@@ -61,8 +61,9 @@ always works). Most cards in the wild declare none.
 the card's top-level `url` in favor of a required `supportedInterfaces`
 array: prefer the first `supportedInterfaces` entry whose `protocolBinding`
 is `JSONRPC`, and fall back to the legacy top-level `url`. A card with
-neither declares no endpoint and fails L1. The entry's `protocolVersion` is
-retained — L2 uses it to pick its method dialect.
+neither declares no endpoint and fails L1. The declared A2A protocol version
+is retained the same way — the interface entry's `protocolVersion`, falling
+back to the legacy top-level field pre-1.0 cards declare.
 
 Parsing uses the SDK's `a2a.AgentCard` type (which imports no `net/http`, so
 it is safe to use purely as a schema), plus a raw-map pass to recover the

@@ -99,14 +99,18 @@ func (c *CardSchema) legacyURL() string {
 	return s
 }
 
-// ProtocolVersion is the declared protocolVersion of the JSONRPC
-// supportedInterfaces entry, or "" for a legacy card with none — L3 uses
-// this to pick its method dialect (05 §L3 Dialect selection).
+// ProtocolVersion is the declared A2A protocol version: the JSONRPC
+// supportedInterfaces entry's protocolVersion (v1.0 format), falling back
+// to the legacy top-level protocolVersion that pre-1.0 cards declare
+// (dropped from the schema in v1.0 along with the top-level url, so — like
+// legacyURL — it's recovered from the raw parse). "" when the card
+// declares neither.
 func (c *CardSchema) ProtocolVersion() string {
-	if iface := c.jsonRPCInterface(); iface != nil {
+	if iface := c.jsonRPCInterface(); iface != nil && iface.ProtocolVersion != "" {
 		return string(iface.ProtocolVersion)
 	}
-	return ""
+	s, _ := rawNestedString(c.raw, "protocolVersion")
+	return s
 }
 
 // Version returns the card's own top-level version (the agent's release
@@ -120,9 +124,9 @@ func (c *CardSchema) Version() *string {
 }
 
 // ProtocolVersionPtr is ProtocolVersion() in the nullable form stored on the
-// agent row and exposed on the wire: nil when the card declares no
-// supportedInterfaces at all, which is itself the signal that the card is in
-// the pre-1.0 format (03).
+// agent row and exposed on the wire: nil when the card declares no protocol
+// version anywhere — neither a supportedInterfaces entry nor the legacy
+// top-level field (03).
 func (c *CardSchema) ProtocolVersionPtr() *string {
 	if pv := c.ProtocolVersion(); pv != "" {
 		v := pv

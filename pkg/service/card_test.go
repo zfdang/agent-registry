@@ -130,7 +130,46 @@ func TestParseCard_LegacyCardHasVersionButNoProtocolVersion(t *testing.T) {
 		t.Errorf("Version() = %v, want 1.4.2", version)
 	}
 	if protocolVersion := card.ProtocolVersionPtr(); protocolVersion != nil {
-		t.Errorf("ProtocolVersionPtr() = %v, want nil (no supportedInterfaces)", protocolVersion)
+		t.Errorf("ProtocolVersionPtr() = %v, want nil (no protocolVersion anywhere)", protocolVersion)
+	}
+}
+
+// TestParseCard_LegacyTopLevelProtocolVersion: pre-1.0 cards declare the
+// protocol version at the top level (dropped in v1.0 along with url) — the
+// extraction must recover it so a 0.2.x agent's listing shows its real
+// declared version instead of a null.
+func TestParseCard_LegacyTopLevelProtocolVersion(t *testing.T) {
+	body := []byte(`{
+		"name": "Legacy Agent",
+		"url": "https://legacy.example/agent",
+		"protocolVersion": "0.2.5"
+	}`)
+
+	card, err := ParseCard(body)
+	if err != nil {
+		t.Fatalf("ParseCard: %v", err)
+	}
+	if pv := card.ProtocolVersion(); pv != "0.2.5" {
+		t.Errorf("ProtocolVersion() = %q, want 0.2.5", pv)
+	}
+}
+
+// TestParseCard_InterfaceProtocolVersionWins: when a card declares both a
+// JSONRPC supportedInterfaces entry and a stray top-level protocolVersion,
+// the interface entry is authoritative.
+func TestParseCard_InterfaceProtocolVersionWins(t *testing.T) {
+	body := []byte(`{
+		"name": "Both Agent",
+		"protocolVersion": "0.2.5",
+		"supportedInterfaces": [{"url": "https://both.example/a2a", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}]
+	}`)
+
+	card, err := ParseCard(body)
+	if err != nil {
+		t.Fatalf("ParseCard: %v", err)
+	}
+	if pv := card.ProtocolVersion(); pv != "1.0" {
+		t.Errorf("ProtocolVersion() = %q, want 1.0", pv)
 	}
 }
 
