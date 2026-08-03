@@ -13,6 +13,7 @@ import { Card } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { CheckList } from '../components/verification/check-list'
 import { VerificationBadge } from '../components/verification/status-badge'
+import { AgentMetaChips } from '../components/agent-meta-chips'
 
 export const addRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -193,6 +194,12 @@ function AddPage() {
                 )}
               </div>
             )}
+            <div className="pt-1">
+              <AgentMetaChips
+                version={validation.extracted.version}
+                protocolVersion={validation.extracted.protocol_version}
+              />
+            </div>
           </Card>
 
           <Button

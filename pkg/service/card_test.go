@@ -81,6 +81,78 @@ func TestParseCard_NoEndpointFailsStaticValidity(t *testing.T) {
 	}
 }
 
+// TestParseCard_ExtractsVersionAndProtocolVersion confirms a v1.0 card's own
+// version and its selected interface's protocolVersion both come back
+// non-nil (03: agents.version / agents.protocol_version).
+func TestParseCard_ExtractsVersionAndProtocolVersion(t *testing.T) {
+	body := []byte(`{
+		"name": "Test Agent",
+		"version": "2.0.0",
+		"supportedInterfaces": [
+			{"url": "https://agents.example/a2a", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+		]
+	}`)
+
+	card, err := ParseCard(body)
+	if err != nil {
+		t.Fatalf("ParseCard: %v", err)
+	}
+	version := card.Version()
+	if version == nil || *version != "2.0.0" {
+		t.Errorf("Version() = %v, want 2.0.0", version)
+	}
+	protocolVersion := card.ProtocolVersionPtr()
+	if protocolVersion == nil || *protocolVersion != "1.0" {
+		t.Errorf("ProtocolVersionPtr() = %v, want 1.0", protocolVersion)
+	}
+}
+
+// TestParseCard_LegacyCardHasVersionButNoProtocolVersion confirms a pre-1.0
+// card (no supportedInterfaces) can still declare its own version, while
+// protocol_version comes back nil — null there is a positive signal that
+// the card is in the pre-1.0 format, not missing data (03).
+func TestParseCard_LegacyCardHasVersionButNoProtocolVersion(t *testing.T) {
+	body := []byte(`{
+		"name": "Legacy Agent",
+		"url": "https://legacy.example/agent",
+		"version": "1.4.2"
+	}`)
+
+	card, err := ParseCard(body)
+	if err != nil {
+		t.Fatalf("ParseCard: %v", err)
+	}
+	version := card.Version()
+	if version == nil || *version != "1.4.2" {
+		t.Errorf("Version() = %v, want 1.4.2", version)
+	}
+	if protocolVersion := card.ProtocolVersionPtr(); protocolVersion != nil {
+		t.Errorf("ProtocolVersionPtr() = %v, want nil (no supportedInterfaces)", protocolVersion)
+	}
+}
+
+// TestParseCard_NoVersionFieldsStillPassesL1 confirms a card declaring
+// neither its own version nor supportedInterfaces yields both fields nil
+// without that absence failing L1 — only a missing name or endpoint fails
+// static validity, not missing version metadata (03, 05 §L1).
+func TestParseCard_NoVersionFieldsStillPassesL1(t *testing.T) {
+	body := []byte(`{"name": "No Version Fields", "url": "https://legacy.example/agent"}`)
+
+	card, err := ParseCard(body)
+	if err != nil {
+		t.Fatalf("ParseCard: %v", err)
+	}
+	if !card.IsStaticallyValid() {
+		t.Fatal("expected a card missing only version/protocol metadata to still be statically valid")
+	}
+	if version := card.Version(); version != nil {
+		t.Errorf("Version() = %v, want nil", version)
+	}
+	if protocolVersion := card.ProtocolVersionPtr(); protocolVersion != nil {
+		t.Errorf("ProtocolVersionPtr() = %v, want nil", protocolVersion)
+	}
+}
+
 // TestParseCard_DeclaredAgentIDPrecedence confirms x-registry.agentId wins
 // over top-level id and provider.id (05 §L2) — none of these three fields
 // exist on a2a.AgentCard, so they must come from the raw parse.

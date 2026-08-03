@@ -73,6 +73,8 @@ func (s *Service) buildAgentDTO(a db.Agent, checks []db.VerificationCheck) model
 		AgentID:            a.AgentID,
 		URL:                a.URL,
 		Description:        a.Description,
+		Version:            a.Version,
+		ProtocolVersion:    a.ProtocolVersion,
 		Skills:             decodeSkills(a.Skills),
 		VerificationStatus: EffectiveStatus(checks, a.VerificationStatus),
 		VerifiedAt:         a.VerifiedAt,

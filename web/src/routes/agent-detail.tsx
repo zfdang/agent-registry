@@ -179,6 +179,20 @@ function AgentDetailPage() {
               {agent.card_url ?? '—'}
             </dd>
           </div>
+          <div className="flex items-center gap-2">
+            <dt className="w-24 shrink-0 text-slate-500 dark:text-slate-400">Version</dt>
+            <dd className="text-slate-800 dark:text-slate-200">{agent.version ?? '—'}</dd>
+          </div>
+          <div className="flex items-center gap-2">
+            <dt className="w-24 shrink-0 text-slate-500 dark:text-slate-400">A2A protocol</dt>
+            <dd className="text-slate-800 dark:text-slate-200">
+              {agent.protocol_version === null ? (
+                <span title="card uses the pre-1.0 format (no supportedInterfaces)">A2A 0.x</span>
+              ) : (
+                `A2A ${agent.protocol_version}`
+              )}
+            </dd>
+          </div>
         </dl>
       </Card>
 

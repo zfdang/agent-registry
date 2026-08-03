@@ -131,16 +131,20 @@ func (s *Service) Validate(ctx context.Context, rawURL string) (*model.ValidateR
 		v.Name = &name
 		v.OwnerName = pr.Card.OwnerName()
 		v.AgentID = pr.DeclaredAgentID
+		v.Version = pr.Card.Version()
+		v.ProtocolVersion = pr.Card.ProtocolVersionPtr()
 		v.CardURL = pr.CardURL
 		v.CardHash = pr.CardHash
 		v.CardJSON = pr.CardJSON
 
 		extracted = &model.ExtractedCard{
-			Name:        pr.Card.Name(),
-			OwnerName:   v.OwnerName,
-			AgentID:     v.AgentID,
-			Description: pr.Card.Description(),
-			Skills:      nonNilSkills(pr.Card.Skills()),
+			Name:            pr.Card.Name(),
+			OwnerName:       v.OwnerName,
+			AgentID:         v.AgentID,
+			Description:     pr.Card.Description(),
+			Version:         v.Version,
+			ProtocolVersion: v.ProtocolVersion,
+			Skills:          nonNilSkills(pr.Card.Skills()),
 		}
 	}
 
@@ -259,6 +263,8 @@ func (s *Service) Register(ctx context.Context, validationID string) (agentDTO m
 		}
 		agent.OwnerName = v.OwnerName
 		agent.AgentID = v.AgentID
+		agent.Version = v.Version
+		agent.ProtocolVersion = v.ProtocolVersion
 		agent.CardURL = v.CardURL
 		agent.CardHash = v.CardHash
 		agent.CardJSON = v.CardJSON
@@ -379,6 +385,8 @@ func (s *Service) Refresh(ctx context.Context, ref string) (model.Agent, []model
 		agent.Name = pr.Card.Name()
 		agent.OwnerName = pr.Card.OwnerName()
 		agent.AgentID = pr.DeclaredAgentID
+		agent.Version = pr.Card.Version()
+		agent.ProtocolVersion = pr.Card.ProtocolVersionPtr()
 		agent.Description = pr.Card.Description()
 		skillsJSON, _ := json.Marshal(nonNilSkills(pr.Card.Skills()))
 		agent.Skills = skillsJSON
@@ -509,6 +517,8 @@ type CompareAgentResult struct {
 	Name               string          `json:"name"`
 	OwnerName          *string         `json:"owner_name"`
 	VerificationStatus string          `json:"verification_status"`
+	Version            *string         `json:"version"`
+	ProtocolVersion    *string         `json:"protocol_version"`
 	Skills             []string        `json:"skills"`
 	Capabilities       json.RawMessage `json:"capabilities"`
 	VerifiedAt         *time.Time      `json:"verified_at"`
@@ -548,6 +558,8 @@ func (s *Service) CompareAgents(ctx context.Context, refs []string) (CompareAgen
 			Name:               agent.Name,
 			OwnerName:          agent.OwnerName,
 			VerificationStatus: EffectiveStatus(checks, agent.VerificationStatus),
+			Version:            agent.Version,
+			ProtocolVersion:    agent.ProtocolVersion,
 			Skills:             skillNames,
 			Capabilities:       caps,
 			VerifiedAt:         agent.VerifiedAt,
