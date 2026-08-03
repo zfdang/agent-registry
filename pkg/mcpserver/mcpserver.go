@@ -161,9 +161,8 @@ type searchAgentsArgs struct {
 }
 
 // searchAgentsSchema builds search_agents' input schema (06):
-// query/status/limit/offset, all optional, status enum verified |
-// verified_with_warnings | stale, limit 1-50 default 10, offset >=0
-// default 0.
+// query/status/limit/offset, all optional, status enum verified | stale,
+// limit 1-50 default 10, offset >=0 default 0.
 func searchAgentsSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type: "object",
@@ -174,7 +173,7 @@ func searchAgentsSchema() *jsonschema.Schema {
 			},
 			"status": {
 				Type: "string",
-				Enum: []any{"verified", "verified_with_warnings", "stale"},
+				Enum: []any{"verified", "stale"},
 			},
 			"limit": {
 				Type:    "integer",
@@ -306,7 +305,7 @@ func registerAgentSchema() *jsonschema.Schema {
 func registerRegisterAgent(srv *mcp.Server, svc *service.Service, mutatingLimiter *middleware.Limiter) {
 	tool := &mcp.Tool{
 		Name:        "register_agent",
-		Description: "Validate a live agent endpoint (L1/L2/L3) and add it to the directory, or update it if already registered. A failed validation is a normal result, not an error.",
+		Description: "Validate a live agent endpoint (L1 agent card, L2 A2A protocol probe) and add it to the directory, or update it if already registered. A failed validation is a normal result, not an error.",
 		InputSchema: registerAgentSchema(),
 	}
 

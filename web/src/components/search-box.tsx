@@ -4,12 +4,11 @@ import { Input } from './ui/input'
 import { cn } from '../lib/cn'
 import type { VerificationStatus } from '../api/types'
 
-type StatusFilter = Extract<VerificationStatus, 'verified' | 'verified_with_warnings' | 'stale'>
+type StatusFilter = Extract<VerificationStatus, 'verified' | 'stale'>
 
 const STATUS_CHIPS: { value: StatusFilter | undefined; label: string }[] = [
   { value: undefined, label: 'All' },
   { value: 'verified', label: 'Verified' },
-  { value: 'verified_with_warnings', label: 'Verified · warnings' },
   { value: 'stale', label: 'Stale' },
 ]
 

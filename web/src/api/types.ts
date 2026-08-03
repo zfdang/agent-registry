@@ -1,6 +1,7 @@
 export interface Skill {
   id: string
   name: string
+  description?: string | null
 }
 
 export interface AgentCapabilities {
@@ -11,11 +12,7 @@ export interface AgentCapabilities {
   [key: string]: unknown
 }
 
-export type VerificationStatus =
-  | 'verified'
-  | 'verified_with_warnings'
-  | 'stale'
-  | 'failed'
+export type VerificationStatus = 'verified' | 'stale' | 'failed'
 
 export interface Agent {
   id: string
@@ -54,8 +51,8 @@ export interface Stats {
   distinct_owners: number
 }
 
-export type CheckKind = 'l1_card' | 'l2_id' | 'l3_protocol'
-export type CheckStatus = 'passed' | 'warning' | 'failed'
+export type CheckKind = 'l1_card' | 'l2_protocol'
+export type CheckStatus = 'passed' | 'failed'
 
 export interface Check {
   kind: CheckKind
@@ -84,7 +81,7 @@ export interface CardHistoryResponse {
   snapshots: CardSnapshot[]
 }
 
-export type ValidationResult = 'passed' | 'passed_with_warnings' | 'failed'
+export type ValidationResult = 'passed' | 'failed'
 
 export interface ExtractedAgent {
   name: string

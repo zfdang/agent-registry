@@ -1,40 +1,38 @@
-# 05 — Verification Pipeline (L1 / L2 / L3)
+# 05 — Verification Pipeline (L1 / L2)
 
 The pipeline proves, at registration time and on any later re-verify, that a
-submitted URL is a live A2A agent and (best-effort) that it acknowledges the
-claimed agent ID. Three checks, run in order with a short-circuit:
+submitted URL is a live A2A agent. Two checks, run in order with a
+short-circuit:
 
 ```
-L1  agent card discovery ── failed ─→ stop (L2/L3 would probe nothing)
+L1  agent card discovery ── failed ─→ stop (L2 would probe nothing)
       └─ passed
-           ├─ L2  agent ID        (warning-only, never blocks)
-           └─ L3  A2A protocol probe
+           └─ L2  A2A protocol probe
 result roll-up
 ```
 
 | Check | Gating | Passes when |
 |---|---|---|
 | **L1 `l1_card`** | **yes** | A statically valid agent card is discoverable at a well-known path |
-| **L2 `l2_id`** | no — worst case `warning` | The card declares an agent ID |
-| **L3 `l3_protocol`** | **yes** | The card's endpoint answers a benign JSON-RPC request with a well-formed 2.0 envelope |
+| **L2 `l2_protocol`** | **yes** | The card's endpoint gives positive evidence it implements an A2A method |
 
 Roll-up:
 
 ```
-L1 failed or L3 failed        → failed                     (not registerable)
-L2 warning, L1+L3 passed      → passed_with_warnings       (registerable)
-all passed                    → passed                     (registerable)
+L1 failed or L2 failed        → failed                     (not registerable)
+both passed                   → passed                     (registerable)
 ```
 
-L2 is advisory by design: many existing agents publish perfectly good cards
-that simply don't embed a registry identifier. Blocking on it would empty the
-directory; hiding it would overstate what was verified. A visible warning is
-the honest middle.
+Both checks gate; there is no advisory tier. (An earlier revision had a
+warning-only "agent ID declared" check between card discovery and the
+protocol probe, but the wild ecosystem answered the question it asked: almost
+no cards declare a registry identifier, so the warning carried no signal and
+was retired. The declared-ID **extraction** survives — see §L1.)
 
 ## L1 — Agent card discovery
 
 Try, in order, stopping at the first candidate that returns HTTP 200 with
-valid JSON:
+a parseable card:
 
 1. `<origin>/.well-known/agent-card.json`
 2. `<origin>/.well-known/agent.json`   (legacy path)
@@ -47,20 +45,38 @@ Static validity requires, per the A2A card schema:
 
 L1 is also the **extraction point** for every card-derived listing field:
 `name`, `description`, `skills`, `capabilities`, `provider.organization`
-(→ `owner_name`), the card's own `version`, and the declared A2A
-`protocol_version`. The submitter types none of these; the card is the sole
-source (the declared agent ID is extracted by L2).
+(→ `owner_name`), the card's own `version`, the declared A2A
+`protocol_version`, and the declared agent ID. The submitter types none of
+these; the card is the sole source.
+
+**The declared agent ID** is read from, first match wins:
+`x-registry.agentId` (extension object, recommended), top-level `id`, then
+`provider.id`. It is informational, never a check outcome: a well-formed
+declaration (non-empty, URI-safe, ≤256 chars) becomes the listing's
+`agent_id` (resolvable per 04); anything else — malformed or absent — leaves
+`agent_id` null, and the agent is simply not addressable by ID (the URL
+always works). Most cards in the wild declare none.
 
 **The service endpoint comes from one of two places**, since A2A v1.0 dropped
 the card's top-level `url` in favor of a required `supportedInterfaces`
 array: prefer the first `supportedInterfaces` entry whose `protocolBinding`
 is `JSONRPC`, and fall back to the legacy top-level `url`. A card with
 neither declares no endpoint and fails L1. The entry's `protocolVersion` is
-retained — L3 uses it to pick its method dialect.
+retained — L2 uses it to pick its method dialect.
 
 Parsing uses the SDK's `a2a.AgentCard` type (which imports no `net/http`, so
 it is safe to use purely as a schema), plus a raw-map pass to recover the
 legacy top-level `url` that the v1.0 struct no longer models.
+
+**Schema-drift tolerance.** Cards in the wild are written against different
+A2A spec drafts, and fields the registry never reads (`security`,
+`securityRequirements`, `securitySchemes`, `signatures`) are where the
+drafts disagree most. A typed-parse mismatch confined to those fields must
+not reject an otherwise valid card, so the typed parse retries with them
+stripped. Only the typed parse sees the stripped copy — `card_json` and the
+card hash always keep the original bytes. A mismatch in a field the registry
+*does* read still fails, with a `card schema mismatch` error distinct from
+`invalid json` (not JSON at all) in the check detail.
 
 On the winning candidate, record in `detail` and on the validation/agent row:
 - `card_url` — where it was found
@@ -76,33 +92,13 @@ submitter can see exactly why discovery failed.
 - The card's declared endpoint must be on **exactly the same
   origin** as the registered URL — scheme, host, and port all included.
   Comparing hosts alone would let an https-served card declare an `http://`
-  endpoint on its own host, after which L3 would probe — and the registry
+  endpoint on its own host, after which L2 would probe — and the registry
   would implicitly vouch for — a cleartext endpoint. Origin mismatch fails L1
   with `card_endpoint_origin_mismatch`.
-- L3 re-applies the same rule after re-reading the card, since the card body
+- L2 re-applies the same rule after re-reading the card, since the card body
   is untrusted input.
 
-## L2 — Agent ID
-
-Nothing is compared — there is no user-submitted ID. The check **extracts**
-the ID the card declares and records whether one exists. Accepted
-declaration locations, first match wins:
-
-1. `x-registry.agentId` (extension object, recommended)
-2. top-level `id`
-3. `provider.id`
-
-| Outcome | Status | Detail |
-|---|---|---|
-| Declared (non-empty, URI-safe, ≤256 chars) | `passed` | `{declared}` |
-| Declared but malformed | `warning` | `{declared, note: "invalid format, ignored"}` — stored `agent_id` stays null |
-| Not declared anywhere | `warning` | `{declared: null, note: "card does not declare an agent id"}` |
-
-Never `failed`. The extracted value becomes the listing's `agent_id`
-(resolvable per 04); an agent without one is simply not addressable by ID —
-the URL always works.
-
-## L3 — A2A protocol probe
+## L2 — A2A protocol probe
 
 `POST` to the card's declared endpoint, `Content-Type: application/json`,
 asking for a task that cannot exist:
@@ -130,20 +126,22 @@ we verify.
 2. **Legacy fallback**: a raw `tasks/get` request through the *same* guarded
    client, with the numeric-code table applied by hand (the SDK keeps those
    constants internal).
+3. **Message fallback**: raw `SendMessage`, then `message/send` (the same
+   v1.0/legacy rename), each with deliberately **empty params** — see below.
 
-At most two attempts. What decides whether the second one happens is
-**whether we got an HTTP response at all** — not whether the first error was
-exactly `MethodNotFound`:
+At most four attempts. What decides whether the next one happens is
+**whether we got an HTTP response at all** — not whether the previous error
+was exactly `MethodNotFound`:
 
-| Outcome of attempt 1 | Next |
+| Outcome of an attempt | Next |
 |---|---|
-| Positive evidence (`result`, or an assigned A2A sentinel) | **pass**, stop |
-| Any HTTP response without positive evidence — `-32601`, `-32600`, `-32603`, a non-200 status, a malformed or non-JSON body | try the legacy dialect |
+| Positive evidence (`result`, an assigned A2A sentinel, or `-32602`) | **pass**, stop |
+| Any HTTP response without positive evidence — `-32601`, `-32600`, `-32603`, a non-200 status, a malformed or non-JSON body | try the next dialect |
 | No HTTP response — network/DNS/TLS failure, timeout, or our SSRF guard refusing the address | **fail**, stop |
-| The card declares no JSONRPC interface the SDK can build a transport from (every pre-1.0 card) | try the legacy dialect |
+| The card declares no JSONRPC interface the SDK can build a transport from (every pre-1.0 card) | try the next dialect |
 
 The discriminator is deliberately "did we reach the endpoint", because the
-only thing the second attempt varies is the **method name**. If we reached the
+only thing the next attempt varies is the **method name**. If we reached the
 server, its complaint may well be about the name, and plenty of real agents
 signal an unknown method as `-32600`, `-32603`, or an HTTP 404 rather than the
 correct `-32601`. If we never reached it, a different method name against the
@@ -157,6 +155,19 @@ endpoint. Pre-1.0 agents proper are covered by the last row — their cards have
 no `supportedInterfaces`, so the SDK client can't be built and the legacy
 dialect is tried directly.
 
+### Message fallback
+
+The task-read dialects don't cover the whole ecosystem: a **minimal agent**
+that implements only the message-send surface — no `GetTask`, no
+`tasks/get` — is still a real, working A2A agent (they are common in the
+wild). When both task-read dialects reach the server without positive
+evidence, the probe tries `SendMessage` and then `message/send`, each with
+**empty params**. Empty params keep this probe as benign as the task read:
+every implementation must reject a message with no parts, so the expected
+pass is `-32602 InvalidParams` — proof the method exists — and no task is
+ever created. An endpoint that answers `-32601` to all four dialects has
+given no evidence it implements any A2A method, and fails.
+
 ### Pass criteria
 
 HTTP 200 with a well-formed JSON-RPC 2.0 envelope (`jsonrpc == "2.0"`, `id`
@@ -167,22 +178,25 @@ must be evidence the endpoint implements the method:
 |---|---|
 | `result` present | **pass** |
 | `error.code` in `-32000…-32099` (A2A-specific, e.g. `-32001 TaskNotFound`, `-32004 UnsupportedOperation`) | **pass** |
-| `error.code == -32602` InvalidParams — knows the method, rejected the dummy id | **pass** |
+| `error.code == -32602` InvalidParams — knows the method, rejected the dummy id / empty message | **pass** |
 | `error.code == -32601` MethodNotFound on **every** dialect tried | **fail** |
-| `-32700` / `-32600` / `-32603`, non-200, non-JSON, malformed envelope, network error | **fail** |
+| `-32700` / `-32600` / `-32603`, non-200, non-JSON, malformed envelope on **every** dialect tried | **fail** |
+| network error / no HTTP response | **fail**, immediately |
 
 **`MethodNotFound` must not pass.** Accepting it was the original bug: it made
 *any* JSON-RPC service — one that has never heard of A2A — verify as an A2A
-agent, and it simultaneously hid the fact that our own probe was using a
-method no v1.0 agent implements.
+agent. The message fallback does not soften this: it accepts agents that
+prove they implement *an A2A method*, while a service that knows none of the
+four dialects still fails.
 
 `detail` records the endpoint, HTTP status, which method finally answered,
-the observed error code, and the card's declared protocol version (null for
-legacy cards) — so the dialect decision is auditable after the fact.
+the observed error code, the card's declared protocol version (null for
+legacy cards), and every attempt — so the dialect decision is auditable
+after the fact.
 
 ## Probe safety (SSRF hardening)
 
-All outbound requests in L1/L3 go through `pkg/probe`, which is the only
+All outbound requests in L1/L2 go through `pkg/probe`, which is the only
 HTTP client in the codebase allowed to fetch user-supplied URLs. **The A2A
 SDK client is constructed with this same `*http.Client` injected**
 (`agentcard.NewResolver(c)`, `a2aclient.WithJSONRPCTransport(c)`) — the SDK's
@@ -206,11 +220,11 @@ path as well as the raw legacy path:
   discovery candidate is the submitted URL itself, so without this rule an
   attacker registers `https://target.example/<open-redirect>?url=https://attacker.example/`,
   the fetch follows the hop, and the **attacker's** card gets recorded under
-  `target.example`. 307/308 preserve method and body, so L3's POST would land
+  `target.example`. 307/308 preserve method and body, so L2's POST would land
   on the attacker too — they would answer the protocol probe on a domain they
   do not control, defeating the whole URL-ownership anchor. As defense in
   depth the pipeline also asserts the response's **final URL origin** matches
-  the expected origin for both L1 and L3, so a redirect that slipped through
+  the expected origin for both L1 and L2, so a redirect that slipped through
   still fails the check.
 - TLS verification is always on; no insecure-skip option exists in the build.
 - Optional operator allowlist (`verification.probe_host_allowlist`) admits

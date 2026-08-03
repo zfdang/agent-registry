@@ -53,10 +53,9 @@ Top to bottom:
 └───────────────────────────────┘
 ```
 
-Badge variants: **Verified** (green check), **Verified · warnings** (amber
-check — tooltip: "agent card does not confirm the registered ID"),
-**Stale** (gray clock — verification older than 30 days). Clicking a card
-navigates to the detail page.
+Badge variants: **Verified** (green check), **Stale** (gray clock —
+verification older than 30 days). Clicking a card navigates to the detail
+page.
 
 ### Pagination
 
@@ -69,10 +68,12 @@ the URL stays addressable and total count is already returned. Show
 - Header: name, owner, badge, registered/verified dates, the agent's URL
   (outbound link, `rel="noopener nofollow"`).
 - **Identity**: `agent_id` with copy button; `card_url`.
-- **Skills & capabilities**: full list from the card.
-- **Verification panel**: the three checks from
+- **Skills & capabilities**: skills render as a collapsible list
+  (collapsed by default, summary row shows the count; each row is the
+  skill's name, id, and description), followed by capability chips.
+- **Verification panel**: the two checks from
   `GET /v1/agents/*ref/verification`, each with status icon, human label
-  (L1 Agent card / L2 Agent ID / L3 A2A protocol), expiry, and an
+  (L1 Agent card / L2 A2A protocol), expiry, and an
   expandable raw `detail` block. A **Refresh** button calls
   `POST /v1/agents/*ref/refresh`, which re-fetches the card and re-runs all
   checks, then refreshes the panel and card sections (button disabled while
@@ -107,8 +108,7 @@ Client-side rule: must be a valid https URL. **Validate** calls
 
 ```
 ✓ L1 · Agent card      found at https://…/.well-known/agent-card.json
-⚠ L2 · Agent ID        card does not declare an agent ID — you can still register
-✓ L3 · A2A protocol    endpoint answered a JSON-RPC 2.0 envelope
+✓ L2 · A2A protocol    endpoint answered a JSON-RPC 2.0 envelope
 ```
 
 Each row expands to the check's `detail` for debugging. Failure states show

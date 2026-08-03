@@ -62,15 +62,14 @@ A single input — the **agent URL** — and a **Validate** button. Everything
 else (name, owner, description, skills, agent ID) is **extracted from the
 live agent card**, never typed in: the card is the source of truth and the
 registry only lists what the endpoint actually publishes. Validation runs
-three checks against the URL:
+two checks against the URL:
 
 | Level | Check | Gating |
 |---|---|---|
 | **L1 — Agent card** | An agent card is discoverable at a well-known path and statically valid; metadata is extracted from it | yes — must pass |
-| **L2 — Agent ID** | The card declares an agent ID | no — a missing ID is a **warning** |
-| **L3 — A2A protocol** | The card's endpoint answers a benign JSON-RPC probe with a well-formed envelope | yes — must pass |
+| **L2 — A2A protocol** | The card's endpoint gives positive evidence it implements an A2A method | yes — must pass |
 
-Only after L1 and L3 pass can the agent be submitted to the registry. The full
+Only after both pass can the agent be submitted to the registry. The full
 pipeline, including SSRF hardening of the outbound probes, is specified in
 [05-verification.md](05-verification.md).
 
@@ -93,7 +92,7 @@ checks on demand.
 - **No user accounts / authentication.** Registration is open and validated
   purely against the live endpoint; abuse is contained by IP rate limits and
   by the fact that you can only register an agent whose URL you actually
-  control (L1/L3 must pass). Control of the URL is also v1's de facto
+  control (L1/L2 must pass). Control of the URL is also v1's de facto
   ownership model: since the URL is the unique key and updating a listing
   means re-passing validation against that URL, only whoever operates the
   endpoint can change its entry. Account-based ownership is a v2 concern

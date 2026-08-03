@@ -24,18 +24,42 @@ type CardSchema struct {
 	raw  map[string]json.RawMessage
 }
 
+// cardFieldsNotRead are top-level card fields the registry never reads but
+// whose schema drifts across A2A revisions in the wild (cards written
+// against other spec drafts shape securityRequirements & co. differently
+// than the SDK's v1.0 types). A typed-parse mismatch inside any of them
+// must not reject an otherwise valid card, so ParseCard retries the typed
+// parse with them stripped. Only the typed parse sees the stripped copy —
+// the raw parse, and therefore the stored card_json and the card hash,
+// always keep the original bytes.
+var cardFieldsNotRead = []string{"security", "securityRequirements", "securitySchemes", "signatures"}
+
 // ParseCard unmarshals a raw card body. It does not enforce L1's static
 // validity rule (non-empty name/endpoint) — callers check that separately
-// so the distinction between "invalid JSON" and "missing required field"
-// stays visible in check detail.
+// so the distinction between "invalid json" (not JSON at all), "card schema
+// mismatch" (JSON that contradicts the A2A schema in a field we read), and
+// "missing required field" stays visible in check detail.
 func ParseCard(body []byte) (*CardSchema, error) {
-	var card a2a.AgentCard
-	if err := json.Unmarshal(body, &card); err != nil {
-		return nil, fmt.Errorf("invalid json: %w", err)
-	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("invalid json: %w", err)
+	}
+	var card a2a.AgentCard
+	if err := json.Unmarshal(body, &card); err != nil {
+		stripped := make(map[string]json.RawMessage, len(raw))
+		for k, v := range raw {
+			stripped[k] = v
+		}
+		for _, k := range cardFieldsNotRead {
+			delete(stripped, k)
+		}
+		reduced, mErr := json.Marshal(stripped)
+		if mErr != nil {
+			return nil, fmt.Errorf("card schema mismatch: %w", err)
+		}
+		if rErr := json.Unmarshal(reduced, &card); rErr != nil {
+			return nil, fmt.Errorf("card schema mismatch: %w", rErr)
+		}
 	}
 	return &CardSchema{Card: &card, raw: raw}, nil
 }

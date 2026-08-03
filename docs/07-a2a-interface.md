@@ -65,7 +65,7 @@ legacy clients). The registry passes its own L1 check by construction.
     { "id": "get-agent",      "name": "Get agent", "tags": ["directory", "resolve"],
       "description": "Resolve one agent by registry id, agent_id, or URL; returns its card and verification state." },
     { "id": "register-agent", "name": "Register agent", "tags": ["directory", "registration"],
-      "description": "Validate a live agent endpoint (L1/L2/L3) and add it to the directory." }
+      "description": "Validate a live agent endpoint (L1 agent card, L2 A2A protocol) and add it to the directory." }
   ]
 }
 ```
@@ -144,8 +144,7 @@ Completed `register-agent` example:
         "registered": true,
         "agent": { "id": "agt_…", "verification_status": "verified" },
         "checks": [ { "kind": "l1_card", "status": "passed" },
-                     { "kind": "l2_id", "status": "warning" },
-                     { "kind": "l3_protocol", "status": "passed" } ] } } ] } ] } }
+                     { "kind": "l2_protocol", "status": "passed" } ] } } ] } ] } }
 ```
 
 A validation that doesn't pass is a **`failed` task** whose artifact carries

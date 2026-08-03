@@ -11,14 +11,10 @@ import (
 // just happened (checks are freshly stamped, so anyExpired is always false)
 // — see RollupAgentStatus for the general form used at read time.
 func ValidationResultToAgentStatus(result string) string {
-	switch result {
-	case db.ValidationPassed:
+	if result == db.ValidationPassed {
 		return db.StatusVerified
-	case db.ValidationPassedWithWarnings:
-		return db.StatusVerifiedWithWarnings
-	default:
-		return db.StatusFailed
 	}
+	return db.StatusFailed
 }
 
 // EffectiveStatus recomputes an agent's verification_status from its live
@@ -30,7 +26,7 @@ func EffectiveStatus(checks []db.VerificationCheck, storedStatus string) string 
 		return storedStatus
 	}
 
-	var l1, l2, l3 string
+	var l1, l2 string
 	now := time.Now().UTC()
 	anyExpired := false
 
@@ -38,15 +34,13 @@ func EffectiveStatus(checks []db.VerificationCheck, storedStatus string) string 
 		switch c.Kind {
 		case db.CheckL1Card:
 			l1 = c.Status
-		case db.CheckL2ID:
+		case db.CheckL2Protocol:
 			l2 = c.Status
-		case db.CheckL3Protocol:
-			l3 = c.Status
 		}
 		if now.After(c.ExpiresAt) {
 			anyExpired = true
 		}
 	}
 
-	return RollupAgentStatus(l1, l2, l3, anyExpired)
+	return RollupAgentStatus(l1, l2, anyExpired)
 }

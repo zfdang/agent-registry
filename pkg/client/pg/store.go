@@ -13,7 +13,7 @@ import (
 // ListParams filters/paginates GET /v1/agents (04).
 type ListParams struct {
 	Query    string // matched via ILIKE across name/owner/description/url/card_text
-	Status   string // "" | verified | verified_with_warnings | stale
+	Status   string // "" | verified | stale
 	Sort     string // "newest" | "name"
 	Page     int
 	PageSize int

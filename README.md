@@ -42,27 +42,25 @@ Search matches one query against name, owner, description, skills, the agent
 URL as a substring (`?q=example.com` finds every agent on that host), and the
 cached card content.
 
-## Verification: L1 / L2 / L3
+## Verification: L1 / L2
 
 | Check | Gating | Passes when |
 |---|---|---|
 | **L1** Agent card | yes | A valid card is discoverable at a well-known path; all listing metadata is extracted here |
-| **L2** Agent ID | no — warning only | The card declares an agent ID |
-| **L3** A2A protocol | yes | The endpoint answers a benign task read with positive evidence of speaking A2A |
+| **L2** A2A protocol | yes | The endpoint gives positive evidence it implements an A2A method |
 
-L2 is advisory on purpose: plenty of good agents publish no registry
-identifier, and blocking on it would empty the directory while hiding it
-would overstate what was verified.
-
-L3 requires *positive* evidence — a result, or an assigned A2A error code.
-A `MethodNotFound` does not pass; accepting it would let any JSON-RPC service
+L2 requires *positive* evidence — a result, an assigned A2A error code, or
+an `InvalidParams` rejection that proves the method exists. A
+`MethodNotFound` does not pass; accepting it would let any JSON-RPC service
 verify as an A2A agent.
 
-**Both agent generations work.** A2A renamed its methods twice. The probe
-tries the v1.0 method first through the official SDK, and if the endpoint
-answers without positive evidence it retries with the pre-1.0 name — so a
-current agent and one built against the 0.x spec both verify. An endpoint we
-never reached at all is not retried.
+**Both agent generations work, and so do minimal agents.** A2A renamed its
+methods twice. The probe tries the v1.0 task read first through the official
+SDK, retries with the pre-1.0 name, and finally probes the message-send
+surface (`SendMessage`, then `message/send`) with deliberately empty params —
+so a current agent, one built against the 0.x spec, and a minimal agent that
+only implements messaging all verify. An endpoint we never reached at all is
+not retried.
 
 Outbound probes are SSRF-hardened: an address guard that runs both before and
 after DNS resolution, https only, same-origin redirects, bounded redirect

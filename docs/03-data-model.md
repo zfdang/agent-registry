@@ -43,7 +43,7 @@ One row per listed agent.
 | `card_url` | text | | Exact URL the winning card was fetched from (latest) |
 | `card_hash` | text | | sha256 of the latest card body |
 | `card_json` | jsonb | | **Cache of the latest snapshot** in `agent_card_snapshots`, served by `get_agent_card` without re-probing |
-| `verification_status` | text | not null | `verified` \| `verified_with_warnings` \| `failed` \| `stale` — denormalized roll-up of the live checks |
+| `verification_status` | text | not null | `verified` \| `failed` \| `stale` — denormalized roll-up of the live checks |
 | `verified_at` | timestamptz | | Last successful pipeline run |
 | `created_at` / `updated_at` | timestamptz | not null | |
 
@@ -72,7 +72,7 @@ existing row — all card-derived metadata is re-extracted from the freshly
 fetched card, the pipeline re-runs, and a new card snapshot is recorded. The
 validate step tells the caller up front that they're updating
 (`mode: "update"` + the existing `id`). Since validation requires the live
-endpoint to pass L1/L3, only someone who controls the URL can effectively
+endpoint to pass L1/L2, only someone who controls the URL can effectively
 change its listing — that is v1's ownership model. A **refresh**
 (`POST /v1/agents/*ref/refresh`) performs exactly the same sync; register
 and refresh differ only in who triggers them and that register can create.
@@ -110,8 +110,8 @@ History is not kept in v1; `card_hash` on the agent covers drift detection.
 | `id` | text | PK, `chk_<uuid>` |
 | `agent_id` | text | FK → `agents.id`, cascade delete; **nullable** — checks created during pre-registration validation have no agent yet and are linked on register |
 | `validation_id` | text | FK → `validations.id`, nullable — set for pre-registration runs |
-| `kind` | text | `l1_card` \| `l2_id` \| `l3_protocol` |
-| `status` | text | `passed` \| `warning` \| `failed` |
+| `kind` | text | `l1_card` \| `l2_protocol` |
+| `status` | text | `passed` \| `failed` |
 | `detail` | jsonb | Machine-readable evidence: candidate URLs tried, HTTP statuses, matched/declared ids, probe response envelope, error strings |
 | `checked_at` | timestamptz | |
 | `expires_at` | timestamptz | `checked_at + 30 days`; expired checks render the agent `stale` |
@@ -131,7 +131,7 @@ to echo results back.
 | `id` | text | PK, `val_<uuid>` |
 | `url` | text | The submitted URL (the only user input) |
 | `name`, `owner_name`, `agent_id` | text | **Extracted server-side from the fetched card** during this validation — register copies these, never client-resent values |
-| `result` | text | `passed` \| `passed_with_warnings` \| `failed` |
+| `result` | text | `passed` \| `failed` |
 | `card_url`, `card_hash`, `card_json` | as in `agents` | Carried onto the agent row at register |
 | `consumed_at` | timestamptz | Set when registration uses it; a consumed validation cannot be reused |
 | `created_at` | timestamptz | |
@@ -166,7 +166,7 @@ Landing-page stats are **computed, not stored**:
 
 ```sql
 total_agents      = COUNT(*) FROM agents
-verified_agents   = COUNT(*) WHERE verification_status IN ('verified','verified_with_warnings')
+verified_agents   = COUNT(*) WHERE verification_status = 'verified'
 new_this_week     = COUNT(*) WHERE created_at > now() - interval '7 days'
 distinct_owners   = COUNT(DISTINCT owner_name) WHERE owner_name IS NOT NULL
 ```
@@ -180,8 +180,7 @@ Recomputed after every pipeline run **and at read time** (expiry can flip it
 without any write):
 
 ```
-l1 failed OR l3 failed            → failed
+l1 failed OR l2 failed            → failed
 any live check expired            → stale
-l2 = warning (l1, l3 passed)     → verified_with_warnings
-l1, l2, l3 all passed             → verified
+l1, l2 both passed                → verified
 ```

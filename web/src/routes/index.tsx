@@ -16,7 +16,7 @@ const PAGE_SIZE = 20
 type IndexSearch = {
   q?: string
   page?: number
-  status?: 'verified' | 'verified_with_warnings' | 'stale'
+  status?: 'verified' | 'stale'
 }
 
 export const indexRoute = createRoute({
@@ -26,9 +26,7 @@ export const indexRoute = createRoute({
     q: typeof search.q === 'string' && search.q.length > 0 ? search.q : undefined,
     page: Number(search.page) > 0 ? Number(search.page) : 1,
     status:
-      search.status === 'verified' || search.status === 'verified_with_warnings' || search.status === 'stale'
-        ? search.status
-        : undefined,
+      search.status === 'verified' || search.status === 'stale' ? search.status : undefined,
   }),
   component: IndexPage,
 })
