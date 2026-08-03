@@ -100,7 +100,7 @@ build, and the response types live next to the code that consumes them.
 
 ### Web registration
 ```
-Browser ── POST /v1/agents/validate ──► handler ─► service.Validate ─► probe (L1,L2,L3) ─► checks persisted (unlinked)
+Browser ── POST /v1/agents/validate ──► handler ─► service.Validate ─► probe (L1,L2) ─► checks persisted (unlinked)
 Browser ── POST /v1/agents (validation_id) ──► service.Register ─► agent row + checks linked
 ```
 

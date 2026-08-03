@@ -7,9 +7,8 @@ import (
 
 // Validation results.
 const (
-	ValidationPassed             = "passed"
-	ValidationPassedWithWarnings = "passed_with_warnings"
-	ValidationFailed             = "failed"
+	ValidationPassed = "passed"
+	ValidationFailed = "failed"
 )
 
 // Validation is a short-lived pre-registration validation session created

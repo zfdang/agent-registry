@@ -10,7 +10,7 @@ MCP; agent runtimes interact through the A2A protocol.
 | [02-architecture.md](02-architecture.md) | System architecture and tech stack |
 | [03-data-model.md](03-data-model.md) | PostgreSQL schema |
 | [04-rest-api.md](04-rest-api.md) | REST API consumed by the web frontend |
-| [05-verification.md](05-verification.md) | The L1/L2/L3 validation pipeline |
+| [05-verification.md](05-verification.md) | The L1/L2 validation pipeline |
 | [06-mcp-interface.md](06-mcp-interface.md) | MCP tools for AI assistants |
 | [07-a2a-interface.md](07-a2a-interface.md) | A2A endpoints for agent runtimes |
 | [08-frontend.md](08-frontend.md) | Web UI pages and components |

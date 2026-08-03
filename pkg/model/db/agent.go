@@ -7,10 +7,9 @@ import (
 
 // VerificationStatus values for Agent.VerificationStatus.
 const (
-	StatusVerified             = "verified"
-	StatusVerifiedWithWarnings = "verified_with_warnings"
-	StatusFailed               = "failed"
-	StatusStale                = "stale"
+	StatusVerified = "verified"
+	StatusFailed   = "failed"
+	StatusStale    = "stale"
 )
 
 // Agent is one listed A2A agent. The agent URL is the identity anchor —

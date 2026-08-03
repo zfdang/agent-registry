@@ -67,7 +67,7 @@ Query params:
 | `q` | Optional. One query, matched everywhere: full-text + substring over name/description/owner/skills, **partial (substring) match on the agent URL**, and full-text over the cached agent-card content (`card_text`). URL example: `q=ip402.xyz` returns every agent whose `url` contains `ip402.xyz` (e.g. `https://ip402.xyz`, `https://api.ip402.xyz/agent`) |
 | `page` | ≥1, default 1 |
 | `page_size` | 1–100, default 20; out-of-range falls back to default |
-| `status` | Optional filter: `verified` \| `verified_with_warnings` \| `stale` |
+| `status` | Optional filter: `verified` \| `stale` |
 | `sort` | `newest` (default) \| `name` |
 
 ```json
@@ -115,23 +115,20 @@ whenever a fetch returns changed content):
 
 ```json
 {
-  "status": "verified_with_warnings",
+  "status": "verified",
   "verified_at": "2026-08-01T09:30:00Z",
   "checks": [
     { "kind": "l1_card",     "status": "passed",  "checked_at": "…", "expires_at": "…",
       "detail": { "card_url": "https://agents.acme.example/.well-known/agent-card.json" } },
-    { "kind": "l2_id",       "status": "warning", "checked_at": "…", "expires_at": "…",
-      "detail": { "declared": null,
-                   "note": "card does not declare an agent id" } },
-    { "kind": "l3_protocol", "status": "passed",  "checked_at": "…", "expires_at": "…",
-      "detail": { "endpoint": "https://agents.acme.example/a2a", "jsonrpc": "2.0" } }
+    { "kind": "l2_protocol", "status": "passed",  "checked_at": "…", "expires_at": "…",
+      "detail": { "endpoint": "https://agents.acme.example/a2a", "method": "GetTask", "protocol_version": "1.0" } }
   ]
 }
 ```
 
 ### `POST /v1/agents/validate` — dry-run validation
 
-Runs the full L1/L2/L3 pipeline (05-verification.md) against the submitted
+Runs the full L1/L2 pipeline (05-verification.md) against the submitted
 URL **without creating an agent**, persists a `validations` row, and returns
 its id.
 
@@ -152,7 +149,7 @@ not an HTTP error):
 ```json
 {
   "validation_id": "val_…",
-  "result": "passed_with_warnings",
+  "result": "passed",
   "registerable": true,
   "mode": "create",
   "existing_id": null,
@@ -171,7 +168,7 @@ not an HTTP error):
 `extracted` is what the listing will contain — the UI renders it as a
 preview so the submitter sees exactly what their card publishes (`name` from
 the card's `name`, `owner_name` from `provider.organization`, `agent_id`
-from the card's declared ID per 05 §L2; the latter two may be null). It is
+from the card's declared ID per 05 §L1; the latter two may be null). It is
 informational: register reads the values stored on the validation row, not
 anything the client sends back. `extracted` is null when L1 failed (there is
 no card).
@@ -211,7 +208,7 @@ content differs from the latest stored one.
 The detail page's **Refresh** button. Re-runs the full pipeline against the
 stored URL: re-fetches the card (new snapshot if content changed,
 `source: "refresh"`), **re-extracts all card-derived metadata** (name, owner,
-description, skills, agent_id), re-runs L1/L2/L3, recomputes
+description, skills, agent_id), re-runs L1/L2, recomputes
 `verification_status`, and returns `{agent, checks}`. Open to anyone —
 every field is card-derived, so a refresh can only sync the listing with
 what the endpoint's operator already publishes; the rate limit is tight

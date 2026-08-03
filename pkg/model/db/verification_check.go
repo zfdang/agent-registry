@@ -8,15 +8,13 @@ import (
 // Check kinds.
 const (
 	CheckL1Card     = "l1_card"
-	CheckL2ID       = "l2_id"
-	CheckL3Protocol = "l3_protocol"
+	CheckL2Protocol = "l2_protocol"
 )
 
 // Check statuses.
 const (
-	CheckStatusPassed  = "passed"
-	CheckStatusWarning = "warning"
-	CheckStatusFailed  = "failed"
+	CheckStatusPassed = "passed"
+	CheckStatusFailed = "failed"
 )
 
 // VerificationCheck is at most one live row per (agent, kind), or per

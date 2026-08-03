@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestParseCard_V1SupportedInterfaces confirms a clean v1.0 card (no
 // legacy top-level url) resolves its endpoint and protocol version from
@@ -171,5 +174,43 @@ func TestParseCard_DeclaredAgentIDPrecedence(t *testing.T) {
 	declared, found := card.DeclaredAgentID()
 	if !found || declared != "did:example:acme:agent" {
 		t.Errorf("DeclaredAgentID() = (%q, %v), want (did:example:acme:agent, true)", declared, found)
+	}
+}
+
+// TestParseCard_ToleratesSchemaDriftInUnreadFields: cards in the wild shape
+// securityRequirements & co. against other A2A spec drafts, and the SDK's
+// typed unmarshal chokes on them. Since the registry never reads those
+// fields, ParseCard must strip them and retry rather than reject the card
+// (observed live: agent.co-legal.be's card).
+func TestParseCard_ToleratesSchemaDriftInUnreadFields(t *testing.T) {
+	body := []byte(`{
+		"name": "Drifted Agent",
+		"supportedInterfaces": [{"url": "https://agent.example/a2a", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}],
+		"securityRequirements": [{"schemes": {"oauth": {"scopes": ["read"]}}}]
+	}`)
+	card, err := ParseCard(body)
+	if err != nil {
+		t.Fatalf("ParseCard: %v", err)
+	}
+	if card.Name() != "Drifted Agent" {
+		t.Errorf("Name = %q, want Drifted Agent", card.Name())
+	}
+	if card.EndpointURL() != "https://agent.example/a2a" {
+		t.Errorf("EndpointURL = %q", card.EndpointURL())
+	}
+}
+
+// TestParseCard_SchemaMismatchInReadFieldStillFails: drift tolerance must
+// not extend to fields the registry actually reads — a card whose skills
+// contradict the schema is still rejected, with the distinct "card schema
+// mismatch" error (not "invalid json").
+func TestParseCard_SchemaMismatchInReadFieldStillFails(t *testing.T) {
+	body := []byte(`{"name": "Bad Skills", "url": "https://agent.example", "skills": "not-an-array"}`)
+	_, err := ParseCard(body)
+	if err == nil {
+		t.Fatal("ParseCard should reject a schema mismatch in a field the registry reads")
+	}
+	if !strings.Contains(err.Error(), "card schema mismatch") {
+		t.Errorf("err = %q, want card schema mismatch", err)
 	}
 }

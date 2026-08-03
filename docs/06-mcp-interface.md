@@ -30,7 +30,7 @@ Find agents matching a query.
     "type": "object",
     "properties": {
       "query":     { "type": "string", "description": "One query matched over name, description, owner, skills, agent URL (partial/substring — a bare hostname works), and cached agent-card content. Empty lists newest agents." },
-      "status":    { "type": "string", "enum": ["verified", "verified_with_warnings", "stale"] },
+      "status":    { "type": "string", "enum": ["verified", "stale"] },
       "limit":     { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
       "offset":    { "type": "integer", "minimum": 0, "default": 0 }
     }
@@ -64,8 +64,8 @@ into an SSRF proxy; the card is at most as stale as the last verification.
 ### `get_verification`
 
 Same `ref` resolution; returns the per-check breakdown, identical to
-`GET /v1/agents/*ref/verification`. Lets an assistant explain *why* an agent
-carries a warning before recommending it.
+`GET /v1/agents/*ref/verification`. Lets an assistant explain what was
+actually verified before recommending an agent.
 
 ### `compare_agents`
 
@@ -116,7 +116,7 @@ Result:
 
 ```json
 { "registered": true, "mode": "update",
-  "agent": { "id": "agt_…", "verification_status": "verified_with_warnings" },
+  "agent": { "id": "agt_…", "verification_status": "verified" },
   "checks": [ … ] }
 ```
 

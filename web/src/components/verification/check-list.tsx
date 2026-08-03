@@ -1,14 +1,13 @@
-import { CheckCircle2, Loader2, AlertTriangle, XCircle } from 'lucide-react'
+import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
 import type { Check, CheckKind } from '../../api/types'
 import { CHECK_LABELS, summarizeCheck } from './check-summary'
 import { JsonViewer } from '../json-viewer'
 import { formatDateTime } from '../../lib/format-date'
 
-const ALL_KINDS: CheckKind[] = ['l1_card', 'l2_id', 'l3_protocol']
+const ALL_KINDS: CheckKind[] = ['l1_card', 'l2_protocol']
 
 const statusIcon = {
   passed: <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />,
-  warning: <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400" />,
   failed: <XCircle className="size-4 text-red-600 dark:text-red-400" />,
 }
 

@@ -224,7 +224,7 @@ func TestSchema_SearchAgents(t *testing.T) {
 	}
 	status := props["status"].(map[string]any)
 	enum, _ := status["enum"].([]any)
-	wantEnum := map[string]bool{"verified": true, "verified_with_warnings": true, "stale": true}
+	wantEnum := map[string]bool{"verified": true, "stale": true}
 	if len(enum) != len(wantEnum) {
 		t.Errorf("status enum = %v, want %v", enum, wantEnum)
 	}

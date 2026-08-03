@@ -31,9 +31,7 @@ function isValidHttpsUrl(value: string): boolean {
 }
 
 function resultToStatus(result: ValidationResult): VerificationStatus {
-  if (result === 'passed') return 'verified'
-  if (result === 'passed_with_warnings') return 'verified_with_warnings'
-  return 'failed'
+  return result === 'passed' ? 'verified' : 'failed'
 }
 
 function AddPage() {

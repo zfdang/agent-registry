@@ -11,6 +11,7 @@ import { VerificationBadge } from '../components/verification/status-badge'
 import { CheckList } from '../components/verification/check-list'
 import { CopyButton } from '../components/ui/copy-button'
 import { JsonViewer } from '../components/json-viewer'
+import { SkillList } from '../components/skill-list'
 import { Card } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -200,17 +201,15 @@ function AgentDetailPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
           Skills &amp; capabilities
         </h2>
-        <div className="flex flex-wrap gap-1.5">
-          {agent.skills.map((skill) => (
-            <Badge key={skill.id} tone="brand">
-              {skill.name}
-            </Badge>
-          ))}
-          {capabilityChips(agent.capabilities).map((cap) => (
-            <Badge key={cap} tone="gray">
-              {cap}
-            </Badge>
-          ))}
+        <div className="flex flex-col gap-3">
+          {agent.skills.length > 0 && <SkillList skills={agent.skills} />}
+          <div className="flex flex-wrap gap-1.5">
+            {capabilityChips(agent.capabilities).map((cap) => (
+              <Badge key={cap} tone="gray">
+                {cap}
+              </Badge>
+            ))}
+          </div>
           {agent.skills.length === 0 && capabilityChips(agent.capabilities).length === 0 && (
             <p className="text-sm text-slate-400 dark:text-slate-500">None declared.</p>
           )}

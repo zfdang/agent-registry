@@ -22,7 +22,7 @@ import (
 // live before the agent flips to stale on read (03, 05 §Freshness).
 const CheckExpiry = 30 * 24 * time.Hour
 
-// CheckResult is one L1/L2/L3 outcome produced by a pipeline run.
+// CheckResult is one L1/L2 outcome produced by a pipeline run.
 type CheckResult struct {
 	Kind      string
 	Status    string
@@ -35,16 +35,16 @@ type CheckResult struct {
 // the card-derived extraction (nil when L1 failed), and the per-check
 // evidence trail.
 type PipelineResult struct {
-	Result          string // passed | passed_with_warnings | failed
+	Result          string // passed | failed
 	Checks          []CheckResult
 	CardURL         string
 	CardHash        string
 	CardJSON        json.RawMessage
 	Card            *CardSchema
-	DeclaredAgentID *string // nil unless L2 found a well-formed id
+	DeclaredAgentID *string // nil unless the card declares a well-formed id
 }
 
-// Verifier runs the L1/L2/L3 pipeline (05) against candidate agent
+// Verifier runs the L1/L2 pipeline (05) against candidate agent
 // endpoints, deduplicating concurrent runs for the same URL.
 type Verifier struct {
 	probe *probe.Client
@@ -79,7 +79,7 @@ func (v *Verifier) run(ctx context.Context, registeredURL string) (*PipelineResu
 
 	if l1Status == db.CheckStatusFailed {
 		return &PipelineResult{
-			Result: RollupValidationResult(l1Status, "", ""),
+			Result: RollupValidationResult(l1Status, ""),
 			Checks: []CheckResult{l1Check},
 		}, nil
 	}
@@ -90,22 +90,19 @@ func (v *Verifier) run(ctx context.Context, registeredURL string) (*PipelineResu
 		return nil, err
 	}
 
-	l2Status, l2Detail, declaredID := runL2(card)
-	l2Check := CheckResult{Kind: db.CheckL2ID, Status: l2Status, Detail: l2Detail, CheckedAt: checkedAt, ExpiresAt: expiresAt}
+	l2Status, l2Detail := v.runL2(ctx, registeredURL, card)
+	l2Check := CheckResult{Kind: db.CheckL2Protocol, Status: l2Status, Detail: l2Detail, CheckedAt: checkedAt, ExpiresAt: expiresAt}
 
-	l3Status, l3Detail := v.runL3(ctx, registeredURL, card)
-	l3Check := CheckResult{Kind: db.CheckL3Protocol, Status: l3Status, Detail: l3Detail, CheckedAt: checkedAt, ExpiresAt: expiresAt}
-
-	result := RollupValidationResult(l1Status, l2Status, l3Status)
+	result := RollupValidationResult(l1Status, l2Status)
 
 	return &PipelineResult{
 		Result:          result,
-		Checks:          []CheckResult{l1Check, l2Check, l3Check},
+		Checks:          []CheckResult{l1Check, l2Check},
 		CardURL:         cardURL,
 		CardHash:        cardHash,
 		CardJSON:        cardBody,
 		Card:            card,
-		DeclaredAgentID: declaredID,
+		DeclaredAgentID: extractDeclaredID(card),
 	}, nil
 }
 
@@ -145,7 +142,7 @@ func (v *Verifier) runL1(ctx context.Context, registeredURL string) (detail json
 		}
 		parsed, err := ParseCard(res.Body)
 		if err != nil {
-			attempts = append(attempts, attempt{URL: candidate, Status: res.StatusCode, Error: "invalid json"})
+			attempts = append(attempts, attempt{URL: candidate, Status: res.StatusCode, Error: shortErr(err)})
 			continue
 		}
 		if !parsed.IsStaticallyValid() {
@@ -175,22 +172,20 @@ func (v *Verifier) runL1(ctx context.Context, registeredURL string) (detail json
 	return d, "", "", nil, nil, db.CheckStatusFailed
 }
 
-// runL2 extracts the declared agent id (05 §L2). Never fails.
-func runL2(card *CardSchema) (status string, detail json.RawMessage, declared *string) {
+// extractDeclaredID pulls the card's declared agent id (05 §L1 is the
+// extraction point for every card-derived field): nil when the card
+// declares none, or the declared value fails the format rule. Purely
+// informational — most cards in the wild declare no id, which is why this
+// is an extraction and not a check.
+func extractDeclaredID(card *CardSchema) *string {
 	raw, found := card.DeclaredAgentID()
-	if !found {
-		d, _ := json.Marshal(map[string]any{"declared": nil, "note": "card does not declare an agent id"})
-		return db.CheckStatusWarning, d, nil
+	if !found || !IsValidAgentIDFormat(raw) {
+		return nil
 	}
-	if !IsValidAgentIDFormat(raw) {
-		d, _ := json.Marshal(map[string]any{"declared": raw, "note": "invalid format, ignored"})
-		return db.CheckStatusWarning, d, nil
-	}
-	d, _ := json.Marshal(map[string]any{"declared": raw})
-	return db.CheckStatusPassed, d, &raw
+	return &raw
 }
 
-// probeRequest models the benign JSON-RPC envelope L3 sends.
+// probeRequest models the benign JSON-RPC envelope L2 sends.
 type probeRequest struct {
 	JSONRPC string         `json:"jsonrpc"`
 	ID      string         `json:"id"`
@@ -199,36 +194,46 @@ type probeRequest struct {
 }
 
 // methodNotFound is the standard JSON-RPC "unknown method" error code.
-// L3 must never let this pass — accepting it is what let any generic
-// JSON-RPC service masquerade as an A2A agent (05 §L3).
+// L2 must never let this pass — accepting it is what let any generic
+// JSON-RPC service masquerade as an A2A agent (05 §L2).
 const methodNotFound = -32601
 
-// canonicalMethod / legacyMethod are L3's two method dialects: A2A renamed
-// tasks/get (v0.1-v0.3) to GetTask in v1.0 (05 §Dialect selection).
+// canonicalMethod / legacyMethod are L2's two task-read dialects: A2A
+// renamed tasks/get (v0.1-v0.3) to GetTask in v1.0 (05 §Dialect selection).
+// The message-send surface went through the same rename — message/send
+// became SendMessage — and is L2's last-resort fallback for minimal agents
+// that implement no task-read method at all (05 §Message fallback).
 const (
-	canonicalMethod = "GetTask"
-	legacyMethod    = "tasks/get"
+	canonicalMethod        = "GetTask"
+	legacyMethod           = "tasks/get"
+	canonicalMessageMethod = "SendMessage"
+	legacyMessageMethod    = "message/send"
 )
 
-// l3Attempt records one probe attempt for the check detail, so the dialect
-// decision is auditable after the fact (05 §L3).
-type l3Attempt struct {
+// probeAttempt records one probe attempt for the check detail, so the
+// dialect decision is auditable after the fact (05 §L2).
+type probeAttempt struct {
 	Method     string `json:"method"`
 	HTTPStatus int    `json:"http_status,omitempty"`
 	ErrorCode  *int   `json:"error_code,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
 
-// runL3 probes the card's declared endpoint with a benign "get a
+// runL2 probes the card's declared endpoint with a benign "get a
 // nonexistent task" request. It prefers the official A2A SDK client (which
 // sends the canonical v1.0 "GetTask" method, the A2A-Version header, and
 // gets us typed sentinel errors for the common cases), falling back to a
 // hand-rolled legacy "tasks/get" request through the same guarded HTTP
-// client when the SDK path reports MethodNotFound — at most two attempts,
-// exactly as 05 §L3 §Dialect selection specifies. Both attempts go through
-// v.probe's guarded *http.Client, so the SSRF guard, same-origin redirect
-// policy, and body cap apply regardless of which one runs.
-func (v *Verifier) runL3(ctx context.Context, registeredURL string, card *CardSchema) (status string, detail json.RawMessage) {
+// client when the SDK path reports MethodNotFound. When both task-read
+// dialects reach the server without positive evidence, the message-send
+// dialects get the same treatment (05 §Message fallback) — a minimal agent
+// that implements only SendMessage is still a real A2A agent, and probing
+// it with deliberately empty params is benign: every implementation must
+// reject a message with no parts (InvalidParams is the expected pass). All
+// attempts go through v.probe's guarded *http.Client, so the SSRF guard,
+// same-origin redirect policy, and body cap apply regardless of which
+// one runs.
+func (v *Verifier) runL2(ctx context.Context, registeredURL string, card *CardSchema) (status string, detail json.RawMessage) {
 	endpoint := card.EndpointURL()
 	protocolVersion := card.ProtocolVersion()
 
@@ -237,32 +242,42 @@ func (v *Verifier) runL3(ctx context.Context, registeredURL string, card *CardSc
 		return db.CheckStatusFailed, d
 	}
 
-	var attempts []l3Attempt
+	var attempts []probeAttempt
 
 	sdkStatus, sdkAttempt, fallThrough := v.probeSDK(ctx, card.Card)
 	attempts = append(attempts, sdkAttempt)
 	if !fallThrough {
-		return sdkStatus, buildL3Detail(endpoint, protocolVersion, attempts)
+		return sdkStatus, buildProbeDetail(endpoint, protocolVersion, attempts)
 	}
 
 	// Legacy fallback: the SDK path answered MethodNotFound (or couldn't
 	// even build a JSONRPC transport from the card, which is the same
 	// signal for a pre-1.0 card with no supportedInterfaces) — try the
-	// pre-1.0 method name directly.
-	hasResult, errCode, httpStatus, finalErr := v.probeOnce(ctx, endpoint, legacyMethod)
-	attempts = append(attempts, l3Attempt{Method: legacyMethod, HTTPStatus: httpStatus, ErrorCode: errCode, Error: finalErr})
-
-	if finalErr != "" {
-		return db.CheckStatusFailed, buildL3Detail(endpoint, protocolVersion, attempts)
+	// pre-1.0 task-read method name directly. From here on each fallback
+	// follows the same discriminator as probeSDK: no HTTP response at all
+	// (httpStatus 0) means the endpoint is dead or blocked and another
+	// method name cannot change that; any response without positive
+	// evidence may still be a complaint about the method name, which is
+	// exactly what the next dialect varies.
+	fallbacks := []struct {
+		method string
+		params map[string]any
+	}{
+		{legacyMethod, map[string]any{"id": "task_probe_nonexistent"}},
+		{canonicalMessageMethod, map[string]any{}},
+		{legacyMessageMethod, map[string]any{}},
 	}
-	if errCode != nil && *errCode == methodNotFound {
-		// MethodNotFound on every dialect tried — the defining fix for P1-2.
-		return db.CheckStatusFailed, buildL3Detail(endpoint, protocolVersion, attempts)
+	for _, fb := range fallbacks {
+		hasResult, errCode, httpStatus, finalErr := v.probeOnce(ctx, endpoint, fb.method, fb.params)
+		attempts = append(attempts, probeAttempt{Method: fb.method, HTTPStatus: httpStatus, ErrorCode: errCode, Error: finalErr})
+		if finalErr != "" && httpStatus == 0 {
+			return db.CheckStatusFailed, buildProbeDetail(endpoint, protocolVersion, attempts)
+		}
+		if finalErr == "" && passesProbe(hasResult, errCode) {
+			return db.CheckStatusPassed, buildProbeDetail(endpoint, protocolVersion, attempts)
+		}
 	}
-	if passesL3(hasResult, errCode) {
-		return db.CheckStatusPassed, buildL3Detail(endpoint, protocolVersion, attempts)
-	}
-	return db.CheckStatusFailed, buildL3Detail(endpoint, protocolVersion, attempts)
+	return db.CheckStatusFailed, buildProbeDetail(endpoint, protocolVersion, attempts)
 }
 
 // sentinelCode mirrors the SDK's internal (unexported) code-to-sentinel
@@ -297,13 +312,13 @@ func codeForSentinel(err error) *int {
 	return nil
 }
 
-// probeSDK attempts L3 via the official A2A SDK client, built over the
+// probeSDK attempts L2 via the official A2A SDK client, built over the
 // same guarded *http.Client v.probe uses (P1-4's SSRF hardening applies
 // here too — see probe.Client.HTTPClient).
 //
 // fallThrough tells the caller whether to retry with the legacy method
 // name, and the rule is about *what kind of failure occurred*, not the
-// specific error code (05 §L3 compat): if we reached the endpoint and got
+// specific error code (05 §L2 compat): if we reached the endpoint and got
 // an HTTP response back — MethodNotFound, InvalidRequest, InternalError,
 // a non-200 status, or a malformed/non-JSON-RPC body — the failure may be
 // about the *method name*, which is exactly what the legacy dialect
@@ -326,21 +341,21 @@ func codeForSentinel(err error) *int {
 // SDK doesn't otherwise expose a typed "no response" sentinel — every
 // other failure path in the SDK's transport (non-200, malformed body,
 // JSON-RPC error) wraps a response that was actually received.
-func (v *Verifier) probeSDK(ctx context.Context, card *a2a.AgentCard) (status string, attempt l3Attempt, fallThrough bool) {
+func (v *Verifier) probeSDK(ctx context.Context, card *a2a.AgentCard) (status string, attempt probeAttempt, fallThrough bool) {
 	client, err := a2aclient.NewFromCard(ctx, card,
 		a2aclient.WithDefaultsDisabled(), // never allow the SDK's unguarded default REST/JSONRPC clients
 		a2aclient.WithJSONRPCTransport(v.probe.HTTPClient()),
 	)
 	if err != nil {
-		return db.CheckStatusFailed, l3Attempt{Method: canonicalMethod, Error: "no compatible JSONRPC transport: " + err.Error()}, true
+		return db.CheckStatusFailed, probeAttempt{Method: canonicalMethod, Error: "no compatible JSONRPC transport: " + err.Error()}, true
 	}
 
 	_, err = client.GetTask(ctx, &a2a.GetTaskRequest{ID: a2a.TaskID("task_probe_nonexistent")})
 	if err == nil {
-		return db.CheckStatusPassed, l3Attempt{Method: canonicalMethod}, false
+		return db.CheckStatusPassed, probeAttempt{Method: canonicalMethod}, false
 	}
 
-	a := l3Attempt{Method: canonicalMethod, ErrorCode: codeForSentinel(err), Error: err.Error()}
+	a := probeAttempt{Method: canonicalMethod, ErrorCode: codeForSentinel(err), Error: err.Error()}
 
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
@@ -374,17 +389,18 @@ func (v *Verifier) probeSDK(ctx context.Context, card *a2a.AgentCard) (status st
 	}
 }
 
-// probeOnce sends one JSON-RPC request using method and classifies the
-// reply. finalErr is non-empty for any hard failure (network, non-200,
-// non-JSON, malformed envelope, cross-origin redirect); errCode is the
-// envelope's error.code when an error was present.
-func (v *Verifier) probeOnce(ctx context.Context, endpoint, method string) (hasResult bool, errCode *int, httpStatus int, finalErr string) {
+// probeOnce sends one JSON-RPC request using method and params and
+// classifies the reply. finalErr is non-empty for any hard failure
+// (network, non-200, non-JSON, malformed envelope, cross-origin redirect);
+// httpStatus is 0 exactly when no HTTP response was received at all;
+// errCode is the envelope's error.code when an error was present.
+func (v *Verifier) probeOnce(ctx context.Context, endpoint, method string, params map[string]any) (hasResult bool, errCode *int, httpStatus int, finalErr string) {
 	reqID := "probe-" + uuid.NewString()
 	body, _ := json.Marshal(probeRequest{
 		JSONRPC: "2.0",
 		ID:      reqID,
 		Method:  method,
-		Params:  map[string]any{"id": "task_probe_nonexistent"},
+		Params:  params,
 	})
 
 	res, err := v.probe.PostJSON(ctx, endpoint, body)
@@ -407,10 +423,12 @@ func (v *Verifier) probeOnce(ctx context.Context, endpoint, method string) (hasR
 	return hasResultVal, code, res.StatusCode, ""
 }
 
-// passesL3 implements 05 §L3's pass table for a well-formed envelope that
-// isn't MethodNotFound (that case is handled by the dialect-retry loop
-// before this is reached).
-func passesL3(hasResult bool, errCode *int) bool {
+// passesProbe implements 05 §L2's pass table for a well-formed envelope:
+// positive evidence that the endpoint implements the probed method.
+// MethodNotFound simply isn't positive evidence — the dialect-retry loop
+// moves on to the next method name and fails once all dialects are
+// exhausted.
+func passesProbe(hasResult bool, errCode *int) bool {
 	if hasResult {
 		return true
 	}
@@ -427,7 +445,7 @@ func passesL3(hasResult bool, errCode *int) bool {
 	return false
 }
 
-func buildL3Detail(endpoint, protocolVersion string, attempts []l3Attempt) json.RawMessage {
+func buildProbeDetail(endpoint, protocolVersion string, attempts []probeAttempt) json.RawMessage {
 	var version any
 	if protocolVersion != "" {
 		version = protocolVersion
@@ -443,7 +461,7 @@ func buildL3Detail(endpoint, protocolVersion string, attempts []l3Attempt) json.
 	return d
 }
 
-// parseJSONRPCEnvelope implements 05 §L3's envelope well-formedness check:
+// parseJSONRPCEnvelope implements 05 §L2's envelope well-formedness check:
 // jsonrpc=="2.0", id echoes the request, and exactly one of result/error is
 // present. It also extracts hasResult and the error's code (if any), since
 // the pass/fail decision depends on which error code came back, not just
@@ -489,6 +507,16 @@ func parseJSONRPCEnvelope(body []byte, wantID string) (ok, hasResult bool, errCo
 	}
 
 	return true, hasResultVal, code, m
+}
+
+// shortErr renders an error for check detail, truncated so a pathological
+// parse error can't bloat the stored detail row.
+func shortErr(err error) string {
+	s := err.Error()
+	if len(s) > 200 {
+		return s[:200] + "…"
+	}
+	return s
 }
 
 // originOf returns scheme://host[:port] for a URL.

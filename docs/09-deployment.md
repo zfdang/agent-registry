@@ -113,5 +113,5 @@ cd web && pnpm dev                   # vite on :5173, proxying /v1,/mcp,/a2a to 
 ```
 
 The verification pipeline's tests stand up a stub A2A agent with
-`httptest.NewTLSServer` and drive L1/L2/L3 against it, so the probe logic is
+`httptest.NewTLSServer` and drive L1/L2 against it, so the probe logic is
 covered without a database or network access.

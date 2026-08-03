@@ -125,7 +125,7 @@ func (s *GormStore) ListAgents(ctx context.Context, p ListParams) ([]db.Agent, i
 		// no filter
 	case db.StatusStale:
 		q = q.Where("verification_status != ? AND "+staleExists, db.StatusFailed)
-	case db.StatusVerified, db.StatusVerifiedWithWarnings:
+	case db.StatusVerified:
 		q = q.Where("verification_status = ? AND NOT "+staleExists, p.Status)
 	default:
 		q = q.Where("verification_status = ?", p.Status)
@@ -167,7 +167,7 @@ func (s *GormStore) Stats(ctx context.Context) (Stats, error) {
 		return out, err
 	}
 	if err := tx.Model(&db.Agent{}).
-		Where("verification_status IN ?", []string{db.StatusVerified, db.StatusVerifiedWithWarnings}).
+		Where("verification_status = ?", db.StatusVerified).
 		Count(&out.VerifiedAgents).Error; err != nil {
 		return out, err
 	}

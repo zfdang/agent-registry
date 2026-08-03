@@ -2,8 +2,7 @@ import type { Check, CheckKind } from '../../api/types'
 
 export const CHECK_LABELS: Record<CheckKind, string> = {
   l1_card: 'L1 · Agent card',
-  l2_id: 'L2 · Agent ID',
-  l3_protocol: 'L3 · A2A protocol',
+  l2_protocol: 'L2 · A2A protocol',
 }
 
 /**
@@ -23,14 +22,11 @@ export function summarizeCheck(check: Check): string {
         return `found at ${String(d.card_url ?? 'the declared card URL')}`
       }
       return note ?? 'agent card not found'
-    case 'l2_id':
+    case 'l2_protocol':
       if (check.status === 'passed') {
-        return d.declared ? `agent ID confirmed: ${String(d.declared)}` : 'agent ID confirmed'
-      }
-      return note ?? 'card does not declare an agent ID — you can still register'
-    case 'l3_protocol':
-      if (check.status === 'passed') {
-        return `endpoint answered a JSON-RPC ${String(d.jsonrpc ?? '2.0')} envelope`
+        return d.method
+          ? `endpoint answered ${String(d.method)} with a well-formed envelope`
+          : 'endpoint answered a well-formed JSON-RPC envelope'
       }
       return note ?? 'A2A protocol probe failed'
     default:
