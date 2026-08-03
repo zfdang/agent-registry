@@ -1,6 +1,6 @@
 # 03 — Data Model (PostgreSQL)
 
-Five tables. GORM entities in `pkg/model/db` are the source of truth;
+Four tables. GORM entities in `pkg/model/db` are the source of truth;
 `AutoMigrate` runs at boot, followed by hand-applied indexes that AutoMigrate
 cannot express (the partial/functional ones below).
 
@@ -8,8 +8,10 @@ cannot express (the partial/functional ones below).
 agents ──< verification_checks
        ──< agent_card_snapshots
 validations (pre-registration, short-lived)
-a2a_tasks (registry's own task surface)
 ```
+
+**A2A task state is not persisted** — see the note at the end of this
+document.
 
 **Identity anchor: the agent URL.** `url` is the only uniqueness constraint —
 whoever controls the endpoint controls the listing (validation proves control
@@ -136,22 +138,25 @@ to echo results back.
 Rows (and their linked checks) are garbage-collected after 24 h by a boot-time
 sweep plus a daily ticker.
 
-## `a2a_tasks`
+## A2A tasks are in-memory, deliberately
 
-Tasks accepted on the registry's **own** A2A surface (see 07).
+The A2A surface (07) runs on the official SDK, whose task store we let default
+to `taskstore.NewInMemory`. There is no `a2a_tasks` table.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | text | PK, `task_<uuid>` — returned to the caller as the A2A task id |
-| `skill` | text | `search-agents` \| `get-agent` \| `register-agent` |
-| `status` | text | `submitted` \| `working` \| `completed` \| `failed` \| `canceled` |
-| `input` | jsonb | The task message parts as received |
-| `result` | jsonb | Artifacts on completion, error detail on failure |
-| `client_ip` | inet | For rate limiting and abuse tracing |
-| `created_at` / `updated_at` | timestamptz | |
+The alternative was implementing the SDK's `taskstore.Store` over Postgres.
+Its four methods look small, but `Update` has to honor optimistic-concurrency
+semantics and `List` has to reproduce the SDK's cursor-pagination and
+filtering contract exactly. Getting that subtly wrong is a worse failure than
+the one it prevents, and the longest task this registry runs is a ~15 second
+validation.
 
-Index on `(status, created_at)` for the worker queue. Terminal tasks are
-retained 7 days, then swept.
+The cost, stated plainly: if the process dies mid-task (an outright crash —
+graceful shutdown already cancels cleanly), a subsequent `GetTask` answers
+`TaskNotFound` rather than reporting a task stuck in `working`. Callers
+re-send; registration is idempotent on the agent URL, so a repeat costs
+nothing. Persisting task state is a v2 item, and the honest `TaskNotFound` is
+a better interim signal than a durable row that lies about a goroutine which
+no longer exists.
 
 ## Stats
 

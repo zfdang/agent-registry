@@ -5,10 +5,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
 
 	"github.com/zfdang/agent-registry/pkg/model/db"
 	"github.com/zfdang/agent-registry/pkg/probe"
@@ -22,8 +26,8 @@ import (
 // against a local stub in tests.
 type allowAllGuard struct{}
 
-func (allowAllGuard) CheckHost(string) error                        { return nil }
-func (allowAllGuard) Control(string, string, syscall.RawConn) error { return nil }
+func (allowAllGuard) CheckHost(string) error                                  { return nil }
+func (allowAllGuard) CheckDial(string, string, string, syscall.RawConn) error { return nil }
 
 // newTestVerifier builds a Verifier whose probe client trusts ts's TLS
 // certificate and bypasses the address guard, per the test hooks
@@ -41,7 +45,10 @@ func newTestVerifier(ts *httptest.Server) *Verifier {
 
 // newStubAgent serves an agent card at /.well-known/agent-card.json whose
 // own url points back at the server, and answers JSON-RPC POSTs at "/"
-// (the card's declared endpoint) with rpcBehavior.
+// (the card's declared endpoint) with rpcBehavior. rpcBehavior receives
+// the decoded request body so it can branch on body["method"] — both the
+// SDK's canonical "GetTask" and the hand-rolled legacy "tasks/get"
+// fallback land on this same handler.
 func newStubAgent(t *testing.T, cardFields map[string]any, rpcBehavior func(w http.ResponseWriter, reqBody map[string]any)) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -75,6 +82,10 @@ func newStubAgent(t *testing.T, cardFields map[string]any, rpcBehavior func(w ht
 	return ts
 }
 
+// echoJSONRPCError answers any JSON-RPC request with a TaskNotFound
+// (-32001) error, echoing the request id — a well-formed A2A-specific
+// error that both the canonical SDK method and the legacy fallback must
+// treat as a pass, since it's proof the endpoint speaks the protocol.
 func echoJSONRPCError(w http.ResponseWriter, body map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
@@ -114,7 +125,7 @@ func TestVerifier_HappyPath(t *testing.T) {
 	if result.DeclaredAgentID == nil || *result.DeclaredAgentID != "did:example:acme:test-agent" {
 		t.Errorf("DeclaredAgentID = %v, want did:example:acme:test-agent", result.DeclaredAgentID)
 	}
-	if result.Card == nil || result.Card.Name != "Test Agent" {
+	if result.Card == nil || result.Card.Name() != "Test Agent" {
 		t.Errorf("Card not extracted correctly: %+v", result.Card)
 	}
 	if result.CardHash == "" {
@@ -228,6 +239,11 @@ func TestVerifier_L3FailsOnMalformedEnvelope(t *testing.T) {
 	}
 }
 
+// TestVerifier_L3PassesOnJSONRPCResultEnvelope confirms a `result` in the
+// response passes L3 regardless of the task actually existing — result
+// presence is itself the evidence the endpoint implements the method. The
+// stub returns a syntactically valid (if practically unusual) a2a.Task so
+// the SDK's typed unmarshal of the result succeeds.
 func TestVerifier_L3PassesOnJSONRPCResultEnvelope(t *testing.T) {
 	ts := newStubAgent(t, map[string]any{
 		"name": "Test Agent",
@@ -236,7 +252,11 @@ func TestVerifier_L3PassesOnJSONRPCResultEnvelope(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"jsonrpc": "2.0",
 			"id":      body["id"],
-			"result":  map[string]any{"status": "not_found"},
+			"result": map[string]any{
+				"id":        "task_probe_nonexistent",
+				"contextId": "ctx-probe",
+				"status":    map[string]any{"state": "TASK_STATE_COMPLETED"},
+			},
 		})
 	})
 
@@ -251,6 +271,391 @@ func TestVerifier_L3PassesOnJSONRPCResultEnvelope(t *testing.T) {
 	l3 := findCheck(result.Checks, db.CheckL3Protocol)
 	if l3 == nil || l3.Status != db.CheckStatusPassed {
 		t.Errorf("l3 = %+v, want passed", l3)
+	}
+}
+
+// TestVerifier_L3FailsWhenMethodNotFoundOnEveryDialect is the regression
+// test for P1-2: a generic JSON-RPC service (or a v1.0 A2A agent that
+// simply doesn't implement whichever dialect we tried) that answers
+// MethodNotFound to both the SDK's canonical "GetTask" and the legacy
+// "tasks/get" fallback must fail L3, not verify as an A2A agent.
+func TestVerifier_L3FailsWhenMethodNotFoundOnEveryDialect(t *testing.T) {
+	ts := newStubAgent(t, map[string]any{
+		"name": "Test Agent",
+	}, func(w http.ResponseWriter, body map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      body["id"],
+			"error":   map[string]any{"code": -32601, "message": "Method not found"},
+		})
+	})
+
+	v := newTestVerifier(ts)
+	result, err := v.Run(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Result != db.ValidationFailed {
+		t.Errorf("result = %q, want failed", result.Result)
+	}
+	l3 := findCheck(result.Checks, db.CheckL3Protocol)
+	if l3 == nil || l3.Status != db.CheckStatusFailed {
+		t.Fatalf("l3 = %+v, want failed", l3)
+	}
+	var detail map[string]any
+	_ = json.Unmarshal(l3.Detail, &detail)
+	attempts, _ := detail["attempts"].([]any)
+	if len(attempts) != 2 {
+		t.Errorf("expected both the SDK attempt and the legacy fallback to be attempted, got %d attempts: %+v", len(attempts), detail)
+	}
+}
+
+// TestVerifier_L3PassesOnUnsupportedOperation confirms an A2A-specific
+// error code (-32004 UnsupportedOperation) passes L3 — it's evidence the
+// endpoint understood the method and simply doesn't support this
+// operation, which is different from never having heard of the method.
+func TestVerifier_L3PassesOnUnsupportedOperation(t *testing.T) {
+	ts := newStubAgent(t, map[string]any{
+		"name": "Test Agent",
+	}, func(w http.ResponseWriter, body map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      body["id"],
+			"error":   map[string]any{"code": -32004, "message": "Unsupported operation"},
+		})
+	})
+
+	v := newTestVerifier(ts)
+	result, err := v.Run(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	l3 := findCheck(result.Checks, db.CheckL3Protocol)
+	if l3 == nil || l3.Status != db.CheckStatusPassed {
+		t.Fatalf("l3 = %+v, want passed", l3)
+	}
+}
+
+// TestVerifier_L3LegacyFallbackSucceeds exercises the two-attempt fallback:
+// the SDK's canonical "GetTask" answers MethodNotFound (a pre-1.0 agent
+// that only understands the legacy method name), and the hand-rolled
+// "tasks/get" retry succeeds — the check must record which method finally
+// answered.
+func TestVerifier_L3LegacyFallbackSucceeds(t *testing.T) {
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	t.Cleanup(ts.Close)
+
+	mux.HandleFunc("/.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"name": "Test Agent",
+			"supportedInterfaces": []map[string]any{
+				{"url": ts.URL, "protocolBinding": "JSONRPC", "protocolVersion": "1.0"},
+			},
+		})
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		if body["method"] == canonicalMethod {
+			json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": body["id"],
+				"error": map[string]any{"code": -32601, "message": "Method not found"},
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0", "id": body["id"],
+			"error": map[string]any{"code": -32001, "message": "TaskNotFound"},
+		})
+	})
+
+	v := newTestVerifier(ts)
+	result, err := v.Run(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	l3 := findCheck(result.Checks, db.CheckL3Protocol)
+	if l3 == nil || l3.Status != db.CheckStatusPassed {
+		t.Fatalf("l3 = %+v, want passed after legacy fallback", l3)
+	}
+	var detail map[string]any
+	_ = json.Unmarshal(l3.Detail, &detail)
+	if detail["method"] != legacyMethod {
+		t.Errorf("detail method = %v, want %q (the dialect that finally answered)", detail["method"], legacyMethod)
+	}
+}
+
+// newV1StubAgent builds a stub agent card with a v1.0 supportedInterfaces
+// entry (so a2aclient.NewFromCard succeeds and the SDK actually makes an
+// HTTP call), whose endpoint dispatches on the incoming JSON-RPC method
+// name via canonicalBehavior (for the SDK's "GetTask") and
+// legacyBehavior (for the hand-rolled "tasks/get" fallback).
+func newV1StubAgent(t *testing.T, canonicalBehavior, legacyBehavior func(w http.ResponseWriter, body map[string]any)) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	t.Cleanup(ts.Close)
+
+	mux.HandleFunc("/.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"name": "Test Agent",
+			"supportedInterfaces": []map[string]any{
+				{"url": ts.URL, "protocolBinding": "JSONRPC", "protocolVersion": "1.0"},
+			},
+		})
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["method"] == canonicalMethod {
+			canonicalBehavior(w, body)
+			return
+		}
+		legacyBehavior(w, body)
+	})
+	return ts
+}
+
+// TestVerifier_L3FallsBackOnInternalError is the review's transitional-
+// agent regression: a v1.0 card whose server answers the canonical
+// GetTask with -32603 InternalError (not a clean -32601) — a common,
+// non-compliant way to signal "unknown method" — must still fall through
+// to the legacy dialect rather than failing outright, since we did get an
+// HTTP response and the failure could be about the method name.
+func TestVerifier_L3FallsBackOnInternalError(t *testing.T) {
+	ts := newV1StubAgent(t,
+		func(w http.ResponseWriter, body map[string]any) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": body["id"],
+				"error": map[string]any{"code": -32603, "message": "Internal error"},
+			})
+		},
+		func(w http.ResponseWriter, body map[string]any) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": body["id"],
+				"error": map[string]any{"code": -32001, "message": "TaskNotFound"},
+			})
+		},
+	)
+
+	v := newTestVerifier(ts)
+	result, err := v.Run(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	l3 := findCheck(result.Checks, db.CheckL3Protocol)
+	if l3 == nil || l3.Status != db.CheckStatusPassed {
+		t.Fatalf("l3 = %+v, want passed after falling back from -32603", l3)
+	}
+	var detail map[string]any
+	_ = json.Unmarshal(l3.Detail, &detail)
+	if detail["method"] != legacyMethod {
+		t.Errorf("detail method = %v, want %q", detail["method"], legacyMethod)
+	}
+}
+
+// TestVerifier_L3FallsBackOnHTTPErrorStatus is the same transitional-agent
+// case via a non-200 HTTP status on the canonical attempt (e.g. a
+// framework routing unknown JSON-RPC methods to a 404) instead of a
+// JSON-RPC error body.
+func TestVerifier_L3FallsBackOnHTTPErrorStatus(t *testing.T) {
+	ts := newV1StubAgent(t,
+		func(w http.ResponseWriter, body map[string]any) {
+			w.WriteHeader(http.StatusNotFound)
+		},
+		func(w http.ResponseWriter, body map[string]any) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": body["id"],
+				"error": map[string]any{"code": -32001, "message": "TaskNotFound"},
+			})
+		},
+	)
+
+	v := newTestVerifier(ts)
+	result, err := v.Run(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	l3 := findCheck(result.Checks, db.CheckL3Protocol)
+	if l3 == nil || l3.Status != db.CheckStatusPassed {
+		t.Fatalf("l3 = %+v, want passed after falling back from HTTP 404", l3)
+	}
+	var detail map[string]any
+	_ = json.Unmarshal(l3.Detail, &detail)
+	if detail["method"] != legacyMethod {
+		t.Errorf("detail method = %v, want %q", detail["method"], legacyMethod)
+	}
+}
+
+// TestVerifier_L3NoRetryOnUnreachableEndpoint is the regression test for
+// *not* retrying endpoint-level failures: when the canonical attempt never
+// gets an HTTP response at all (here, a closed TCP port — connection
+// refused, indistinguishable in kind from a DNS failure, TLS failure, or
+// our own SSRF guard refusing the dial), the legacy dialect must not be
+// tried either, since a different method name to the same dead address
+// can't change the outcome. Exactly one L3 attempt must be recorded.
+func TestVerifier_L3NoRetryOnUnreachableEndpoint(t *testing.T) {
+	// Bind a listener, learn its address, then close it immediately so the
+	// address is guaranteed to refuse connections.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	unreachable := "https://" + addr
+
+	// Exercises probeSDK directly (same pattern as
+	// TestProbeSDK_UsesGuardedClient) rather than the full L1+L3 pipeline,
+	// since same-origin requires the registered URL and the card's
+	// endpoint to match, and this test only cares about L3's retry
+	// decision for an endpoint-level failure.
+	client := probe.NewClient(probe.WithGuard(allowAllGuard{}))
+	v := NewVerifier(client)
+	card := &a2a.AgentCard{
+		Name:                "Test Agent",
+		SupportedInterfaces: []*a2a.AgentInterface{a2a.NewAgentInterface(unreachable, a2a.TransportProtocolJSONRPC)},
+	}
+
+	status, attempt, fallThrough := v.probeSDK(context.Background(), card)
+
+	if status != db.CheckStatusFailed {
+		t.Errorf("status = %q, want failed", status)
+	}
+	if fallThrough {
+		t.Error("fallThrough = true, want false (an unreachable endpoint must not be retried)")
+	}
+	if attempt.Method != canonicalMethod {
+		t.Errorf("attempt.Method = %q, want %q", attempt.Method, canonicalMethod)
+	}
+}
+
+// TestVerifier_L1CrossOriginRedirectRefused is P1-4's L1 regression: an
+// open redirect on the registered host must not let a different origin's
+// card get recorded under it.
+func TestVerifier_L1CrossOriginRedirectRefused(t *testing.T) {
+	attackerMux := http.NewServeMux()
+	attacker := httptest.NewTLSServer(attackerMux)
+	defer attacker.Close()
+	attackerMux.HandleFunc("/card", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"name":"attacker","url":"` + attacker.URL + `"}`))
+	})
+
+	targetMux := http.NewServeMux()
+	target := httptest.NewTLSServer(targetMux)
+	defer target.Close()
+	targetMux.HandleFunc("/.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/card", http.StatusFound)
+	})
+
+	pool := x509.NewCertPool()
+	pool.AddCert(target.Certificate())
+	pool.AddCert(attacker.Certificate())
+	client := probe.NewClient(probe.WithGuard(allowAllGuard{}), probe.WithTLSConfig(&tls.Config{RootCAs: pool}))
+	v := NewVerifier(client)
+
+	result, err := v.Run(context.Background(), target.URL)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Result != db.ValidationFailed {
+		t.Errorf("result = %q, want failed (cross-origin redirect must not hand the card to the attacker's origin)", result.Result)
+	}
+	if len(result.Checks) != 1 || result.Checks[0].Status != db.CheckStatusFailed {
+		t.Fatalf("l1 = %+v, want a single failed check", result.Checks)
+	}
+}
+
+// TestVerifier_L3CrossOriginRedirectRefused is P1-4's L3 regression: the
+// protocol probe must not follow a redirect off the card's origin (307/308
+// preserve method+body, which would hand the probe to an
+// attacker-controlled endpoint). The card here has no supportedInterfaces
+// (legacy top-level url only), so the SDK step falls straight through to
+// the hand-rolled legacy attempt, which is what actually issues the POST —
+// exercising the redirect refusal on that path directly.
+func TestVerifier_L3CrossOriginRedirectRefused(t *testing.T) {
+	attackerMux := http.NewServeMux()
+	attacker := httptest.NewTLSServer(attackerMux)
+	defer attacker.Close()
+	attackerMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		echoJSONRPCError(w, body)
+	})
+
+	originMux := http.NewServeMux()
+	origin := httptest.NewTLSServer(originMux)
+	defer origin.Close()
+	originMux.HandleFunc("/.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"name":"Test Agent","url":"` + origin.URL + `"}`))
+	})
+	originMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/", http.StatusTemporaryRedirect)
+	})
+
+	pool := x509.NewCertPool()
+	pool.AddCert(origin.Certificate())
+	pool.AddCert(attacker.Certificate())
+	client := probe.NewClient(probe.WithGuard(allowAllGuard{}), probe.WithTLSConfig(&tls.Config{RootCAs: pool}))
+	v := NewVerifier(client)
+
+	result, err := v.Run(context.Background(), origin.URL)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	l3 := findCheck(result.Checks, db.CheckL3Protocol)
+	if l3 == nil || l3.Status != db.CheckStatusFailed {
+		t.Fatalf("l3 = %+v, want failed (cross-origin redirect must be refused)", l3)
+	}
+}
+
+// TestProbeSDK_UsesGuardedClient is the acceptance-criteria regression
+// test proving the SDK client path really goes through v.probe's guarded
+// *http.Client and not some unguarded default: pointing the SDK client at
+// a loopback address (which the real AddressGuard refuses, unlike the
+// allowAllGuard the other tests use) must fail with the guard's own
+// error, not a plain connection error.
+func TestProbeSDK_UsesGuardedClient(t *testing.T) {
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	defer ts.Close()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		echoJSONRPCError(w, body)
+	})
+
+	pool := x509.NewCertPool()
+	pool.AddCert(ts.Certificate())
+	// No WithGuard override this time — the real AddressGuard is what
+	// must refuse the loopback dial.
+	client := probe.NewClient(probe.WithTLSConfig(&tls.Config{RootCAs: pool}))
+	v := NewVerifier(client)
+
+	card := &a2a.AgentCard{
+		Name:                "Test Agent",
+		SupportedInterfaces: []*a2a.AgentInterface{a2a.NewAgentInterface(ts.URL, a2a.TransportProtocolJSONRPC)},
+	}
+
+	status, attempt, fallThrough := v.probeSDK(context.Background(), card)
+	if status != db.CheckStatusFailed {
+		t.Errorf("status = %q, want failed (loopback must be refused)", status)
+	}
+	if fallThrough {
+		t.Error("fallThrough = true, want false (a guard refusal is not a MethodNotFound case)")
+	}
+	if !strings.Contains(strings.ToLower(attempt.Error), "loopback") {
+		t.Errorf("attempt.Error = %q, want it to mention the guard's loopback refusal", attempt.Error)
 	}
 }
 

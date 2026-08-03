@@ -121,10 +121,16 @@ func isUniqueLocalV6(ip net.IP) bool {
 	return len(ip) == net.IPv6len && ip[0]&0xfe == 0xfc
 }
 
-// Control is a net.Dialer.Control func: it runs the address guard on the
-// resolved socket address immediately before connect(2), which is what
-// defeats DNS-rebinding between the pre-resolution check and the dial.
-func (g *AddressGuard) Control(_, address string, _ syscall.RawConn) error {
+// CheckDial is the post-resolution guard, called from the dial's Control
+// func immediately before connect(2) — which is what defeats DNS-rebinding
+// between the pre-resolution check and the dial. Unlike a bare
+// net.Dialer.Control func, it takes the original pre-resolution hostname
+// (dialHost) as a separate parameter from the resolved socket address
+// (address), so the allowlist can actually match against the hostname the
+// caller asked to dial rather than losing it to DNS resolution — passing ""
+// for dialHost (as a plain net.Dialer.Control callback would be forced to)
+// makes every allowlist entry permanently dead code.
+func (g *AddressGuard) CheckDial(dialHost, _ /* network */, address string, _ syscall.RawConn) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
 		host = address
@@ -133,5 +139,5 @@ func (g *AddressGuard) Control(_, address string, _ syscall.RawConn) error {
 	if ip == nil {
 		return fmt.Errorf("dial guard: unparseable address %q", address)
 	}
-	return g.CheckIP("", ip)
+	return g.CheckIP(dialHost, ip)
 }

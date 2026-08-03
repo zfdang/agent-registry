@@ -66,18 +66,14 @@ type Store interface {
 	ListSnapshots(ctx context.Context, agentID string) ([]db.AgentCardSnapshot, error)
 	TrimSnapshots(ctx context.Context, agentID string, keep int) error
 
-	// A2A tasks
-	CreateTask(ctx context.Context, t *db.A2ATask) error
-	GetTask(ctx context.Context, id string) (*db.A2ATask, error)
-	UpdateTask(ctx context.Context, t *db.A2ATask) error
-	// CASTaskStatus performs an atomic status transition, used by the
-	// register-agent worker to claim submitted tasks exactly once.
-	CASTaskStatus(ctx context.Context, id, fromStatus, toStatus string) (bool, error)
-	ListTasksByStatus(ctx context.Context, status string, limit int) ([]db.A2ATask, error)
-
 	// Garbage collection
 	// SweepExpiredValidations deletes validations (and their checks)
 	// created before createdBefore.
 	SweepExpiredValidations(ctx context.Context, createdBefore time.Time) (int64, error)
-	SweepTerminalTasks(ctx context.Context, updatedBefore time.Time) (int64, error)
+
+	// Transaction runs fn with a Store bound to a single DB transaction;
+	// fn's error rolls back. Used to make multi-write operations (like
+	// register's consume+create/update+link+snapshot sequence) atomic
+	// (P2-3).
+	Transaction(ctx context.Context, fn func(ctx context.Context, tx Store) error) error
 }

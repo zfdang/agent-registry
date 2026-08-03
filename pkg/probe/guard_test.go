@@ -77,16 +77,39 @@ func TestAddressGuard_CheckHost(t *testing.T) {
 	}
 }
 
-func TestAddressGuard_Control(t *testing.T) {
+func TestAddressGuard_CheckDial(t *testing.T) {
 	g := NewAddressGuard(nil)
 
-	if err := g.Control("tcp4", "127.0.0.1:443", nil); err == nil {
-		t.Error("Control with loopback address = nil, want error")
+	if err := g.CheckDial("", "tcp4", "127.0.0.1:443", nil); err == nil {
+		t.Error("CheckDial with loopback address = nil, want error")
 	}
-	if err := g.Control("tcp4", "93.184.216.34:443", nil); err != nil {
-		t.Errorf("Control with public address = %v, want nil", err)
+	if err := g.CheckDial("", "tcp4", "93.184.216.34:443", nil); err != nil {
+		t.Errorf("CheckDial with public address = %v, want nil", err)
 	}
-	if err := g.Control("tcp4", "not-an-address", nil); err == nil {
-		t.Error("Control with unparseable address = nil, want error")
+	if err := g.CheckDial("", "tcp4", "not-an-address", nil); err == nil {
+		t.Error("CheckDial with unparseable address = nil, want error")
+	}
+}
+
+// TestAddressGuard_CheckDial_AllowlistPlumbing is the regression test for
+// the dead-allowlist bug (P2-4): the dial-time hostname must actually reach
+// CheckIP so an allowlisted hostname resolving into RFC1918 is permitted,
+// a non-allowlisted one refused, and loopback refused even when
+// allowlisted — mirroring exactly how probe.Client's custom DialContext
+// calls CheckDial.
+func TestAddressGuard_CheckDial_AllowlistPlumbing(t *testing.T) {
+	g := NewAddressGuard([]string{"internal.test"})
+
+	// Allowlisted hostname resolving to a private address: permitted.
+	if err := g.CheckDial("internal.test", "tcp4", "192.168.1.5:443", nil); err != nil {
+		t.Errorf("allowlisted host resolving to RFC1918 = %v, want nil", err)
+	}
+	// Non-allowlisted hostname resolving to the same private address: refused.
+	if err := g.CheckDial("other.test", "tcp4", "192.168.1.5:443", nil); err == nil {
+		t.Error("non-allowlisted host resolving to RFC1918 = nil, want error")
+	}
+	// Loopback stays refused even for an allowlisted hostname.
+	if err := g.CheckDial("internal.test", "tcp4", "127.0.0.1:443", nil); err == nil {
+		t.Error("loopback via allowlisted host = nil, want error")
 	}
 }

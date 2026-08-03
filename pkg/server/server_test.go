@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/zfdang/agent-registry/pkg/client/pg"
+	"github.com/zfdang/agent-registry/pkg/middleware"
 	"github.com/zfdang/agent-registry/pkg/model/db"
 	"github.com/zfdang/agent-registry/pkg/probe"
 	"github.com/zfdang/agent-registry/pkg/service"
@@ -67,20 +68,11 @@ func (fakeStore) CreateSnapshot(context.Context, *db.AgentCardSnapshot) error { 
 func (fakeStore) ListSnapshots(context.Context, string) ([]db.AgentCardSnapshot, error) {
 	return nil, nil
 }
-func (fakeStore) TrimSnapshots(context.Context, string, int) error { return nil }
-func (fakeStore) CreateTask(context.Context, *db.A2ATask) error    { return nil }
-func (fakeStore) GetTask(context.Context, string) (*db.A2ATask, error) {
-	return nil, gorm.ErrRecordNotFound
-}
-func (fakeStore) UpdateTask(context.Context, *db.A2ATask) error { return nil }
-func (fakeStore) CASTaskStatus(context.Context, string, string, string) (bool, error) {
-	return false, nil
-}
-func (fakeStore) ListTasksByStatus(context.Context, string, int) ([]db.A2ATask, error) {
-	return nil, nil
-}
+func (fakeStore) TrimSnapshots(context.Context, string, int) error                  { return nil }
 func (fakeStore) SweepExpiredValidations(context.Context, time.Time) (int64, error) { return 0, nil }
-func (fakeStore) SweepTerminalTasks(context.Context, time.Time) (int64, error)      { return 0, nil }
+func (f fakeStore) Transaction(ctx context.Context, fn func(context.Context, pg.Store) error) error {
+	return fn(ctx, f)
+}
 
 // TestNewDoesNotPanicOnRouteRegistration exercises gin's route registration
 // for conflicts. gin's radix-tree router panics immediately at
@@ -91,8 +83,9 @@ func (fakeStore) SweepTerminalTasks(context.Context, time.Time) (int64, error)  
 func TestNewDoesNotPanicOnRouteRegistration(t *testing.T) {
 	log := zap.NewNop().Sugar()
 	svc := service.New(fakeStore{}, probe.NewClient(), log)
+	resolver := middleware.NewIPResolver(nil)
 
-	engine := New(svc, log, nil, nil)
+	engine := New(svc, log, resolver, nil, nil)
 	if engine == nil {
 		t.Fatal("New returned nil engine")
 	}

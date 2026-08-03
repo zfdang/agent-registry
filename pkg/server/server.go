@@ -39,18 +39,23 @@ func NewLimiters() *Limiters {
 
 // MCPMountFunc mounts the MCP streamable-HTTP handler onto the engine.
 // Declared as a func type so pkg/server doesn't import pkg/mcpserver
-// directly (kept as a thin injection point for main.go to wire up).
-type MCPMountFunc func(engine *gin.Engine)
+// directly (kept as a thin injection point for main.go to wire up). It
+// receives the shared limiters and IP resolver so it can both gate the
+// route itself (reads) and rate-limit specific tools (register_agent)
+// from inside a tool handler, where no gin.Context is available (P1-3).
+type MCPMountFunc func(engine *gin.Engine, limiters *Limiters, resolver *middleware.IPResolver)
 
 // A2AMountFunc mounts the A2A agent-card + JSON-RPC routes.
-type A2AMountFunc func(engine *gin.Engine, limiters *Limiters)
+type A2AMountFunc func(engine *gin.Engine, limiters *Limiters, resolver *middleware.IPResolver)
 
-// New builds the fully-wired gin engine.
-func New(svc *service.Service, log *zap.SugaredLogger, mountMCP MCPMountFunc, mountA2A A2AMountFunc) *gin.Engine {
+// New builds the fully-wired gin engine. resolver determines the trusted
+// boundary for X-Forwarded-For (P2-1) and is shared by every surface's
+// rate limiting.
+func New(svc *service.Service, log *zap.SugaredLogger, resolver *middleware.IPResolver, mountMCP MCPMountFunc, mountA2A A2AMountFunc) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(middleware.RequestLogger(log))
+	r.Use(middleware.RequestLogger(log, resolver))
 	r.Use(middleware.CORS())
 	r.Use(middleware.BodyLimit())
 
@@ -61,19 +66,19 @@ func New(svc *service.Service, log *zap.SugaredLogger, mountMCP MCPMountFunc, mo
 
 	v1 := r.Group("/v1")
 	{
-		v1.GET("/stats", middleware.RateLimit(limiters.Reads), h.Stats)
-		v1.GET("/agents", middleware.RateLimit(limiters.Reads), h.ListAgents)
-		v1.GET("/agents/*ref", middleware.RateLimit(limiters.Reads), h.GetRefDispatch)
+		v1.GET("/stats", middleware.RateLimit(limiters.Reads, resolver), h.Stats)
+		v1.GET("/agents", middleware.RateLimit(limiters.Reads, resolver), h.ListAgents)
+		v1.GET("/agents/*ref", middleware.RateLimit(limiters.Reads, resolver), h.GetRefDispatch)
 
-		v1.POST("/agents", middleware.RateLimit(limiters.Mutating), h.RegisterBare)
-		v1.POST("/agents/*ref", middleware.RateLimit(limiters.Mutating), h.PostRefDispatch)
+		v1.POST("/agents", middleware.RateLimit(limiters.Mutating, resolver), h.RegisterBare)
+		v1.POST("/agents/*ref", middleware.RateLimit(limiters.Mutating, resolver), h.PostRefDispatch)
 	}
 
 	if mountMCP != nil {
-		mountMCP(r)
+		mountMCP(r, limiters, resolver)
 	}
 	if mountA2A != nil {
-		mountA2A(r, limiters)
+		mountA2A(r, limiters, resolver)
 	}
 
 	return r

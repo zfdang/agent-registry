@@ -25,13 +25,7 @@ type Service struct {
 	log      *zap.SugaredLogger
 
 	statsCache *statsCache
-	worker     *TaskWorker
 }
-
-// SetWorker wires the A2A register-agent async worker. Called once during
-// boot, after both Service and TaskWorker are constructed (they reference
-// each other).
-func (s *Service) SetWorker(w *TaskWorker) { s.worker = w }
 
 // New builds a Service over a Store and a probe client.
 func New(store pg.Store, probeClient *probe.Client, log *zap.SugaredLogger) *Service {

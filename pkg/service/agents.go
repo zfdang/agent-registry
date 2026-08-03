@@ -127,7 +127,7 @@ func (s *Service) Validate(ctx context.Context, rawURL string) (*model.ValidateR
 
 	var extracted *model.ExtractedCard
 	if pr.Card != nil {
-		name := pr.Card.Name
+		name := pr.Card.Name()
 		v.Name = &name
 		v.OwnerName = pr.Card.OwnerName()
 		v.AgentID = pr.DeclaredAgentID
@@ -136,11 +136,11 @@ func (s *Service) Validate(ctx context.Context, rawURL string) (*model.ValidateR
 		v.CardJSON = pr.CardJSON
 
 		extracted = &model.ExtractedCard{
-			Name:        pr.Card.Name,
+			Name:        pr.Card.Name(),
 			OwnerName:   v.OwnerName,
 			AgentID:     v.AgentID,
-			Description: pr.Card.Description,
-			Skills:      nonNilSkills(pr.Card.Skills),
+			Description: pr.Card.Description(),
+			Skills:      nonNilSkills(pr.Card.Skills()),
 		}
 	}
 
@@ -197,7 +197,11 @@ func checksFromResults(results []CheckResult) []model.Check {
 }
 
 // Register consumes a validation and creates or updates the agent it
-// describes (04 §register, 03 §upsert rule).
+// describes (04 §register, 03 §upsert rule). The consume + create/update +
+// link-checks + snapshot sequence runs inside a single DB transaction
+// (P2-3): without that, a failure partway through (e.g. the process dying
+// between consuming the validation and creating the agent) leaves the
+// validation burned with no agent row and no way to retry it.
 func (s *Service) Register(ctx context.Context, validationID string) (agentDTO model.Agent, mode string, checks []model.Check, created bool, err error) {
 	v, err := s.store.GetValidation(ctx, validationID)
 	if err != nil {
@@ -218,76 +222,82 @@ func (s *Service) Register(ctx context.Context, validationID string) (agentDTO m
 		return model.Agent{}, "", nil, false, ErrValidationFailed
 	}
 
-	ok, err := s.store.ConsumeValidation(ctx, validationID, now)
-	if err != nil {
-		return model.Agent{}, "", nil, false, err
-	}
-	if !ok {
-		return model.Agent{}, "", nil, false, ErrValidationConsumed
-	}
-
 	var card *CardSchema
 	if len(v.CardJSON) > 0 {
 		card, _ = ParseCard(v.CardJSON) // already validated at Validate time
 	}
 
-	existing, err := s.store.GetAgentByURL(ctx, v.URL)
-	isCreate := pg.IsNotFound(err)
-	if err != nil && !isCreate {
-		return model.Agent{}, "", nil, false, err
-	}
+	var agent *db.Agent
+	var isCreate bool
 
-	agent := &db.Agent{}
-	if !isCreate {
-		agent = existing
-	} else {
-		agent.ID = db.NewID(db.AgentIDPrefix)
-		agent.CreatedAt = now
-		agent.URL = v.URL
-	}
-
-	if v.Name != nil {
-		agent.Name = *v.Name
-	}
-	agent.OwnerName = v.OwnerName
-	agent.AgentID = v.AgentID
-	agent.CardURL = v.CardURL
-	agent.CardHash = v.CardHash
-	agent.CardJSON = v.CardJSON
-	agent.VerificationStatus = ValidationResultToAgentStatus(v.Result)
-	agent.VerifiedAt = &now
-	agent.UpdatedAt = now
-
-	if card != nil {
-		skillsJSON, _ := json.Marshal(nonNilSkills(card.Skills))
-		agent.Description = card.Description
-		agent.Skills = skillsJSON
-		caps := card.Capabilities
-		if len(caps) == 0 {
-			caps = json.RawMessage("{}")
+	txErr := s.store.Transaction(ctx, func(ctx context.Context, tx pg.Store) error {
+		ok, err := tx.ConsumeValidation(ctx, validationID, now)
+		if err != nil {
+			return err
 		}
-		agent.Capabilities = caps
-		agent.CardText = card.CardText()
-	}
-
-	mode = "update"
-	if isCreate {
-		mode = "create"
-		if err := s.store.CreateAgent(ctx, agent); err != nil {
-			return model.Agent{}, "", nil, false, fmt.Errorf("create agent: %w", err)
+		if !ok {
+			return ErrValidationConsumed
 		}
-	} else {
-		if err := s.store.UpdateAgent(ctx, agent); err != nil {
-			return model.Agent{}, "", nil, false, fmt.Errorf("update agent: %w", err)
+
+		existing, err := tx.GetAgentByURL(ctx, v.URL)
+		isCreate = pg.IsNotFound(err)
+		if err != nil && !isCreate {
+			return err
 		}
-	}
 
-	if err := s.store.LinkValidationChecksToAgent(ctx, validationID, agent.ID); err != nil {
-		return model.Agent{}, "", nil, false, fmt.Errorf("link checks: %w", err)
-	}
+		agent = &db.Agent{}
+		if !isCreate {
+			agent = existing
+		} else {
+			agent.ID = db.NewID(db.AgentIDPrefix)
+			agent.CreatedAt = now
+			agent.URL = v.URL
+		}
 
-	if err := s.maybeSnapshot(ctx, agent.ID, v.CardURL, v.CardHash, v.CardJSON, sourceForMode(mode)); err != nil {
-		return model.Agent{}, "", nil, false, fmt.Errorf("snapshot: %w", err)
+		if v.Name != nil {
+			agent.Name = *v.Name
+		}
+		agent.OwnerName = v.OwnerName
+		agent.AgentID = v.AgentID
+		agent.CardURL = v.CardURL
+		agent.CardHash = v.CardHash
+		agent.CardJSON = v.CardJSON
+		agent.VerificationStatus = ValidationResultToAgentStatus(v.Result)
+		agent.VerifiedAt = &now
+		agent.UpdatedAt = now
+
+		if card != nil {
+			skillsJSON, _ := json.Marshal(nonNilSkills(card.Skills()))
+			agent.Description = card.Description()
+			agent.Skills = skillsJSON
+			agent.Capabilities = card.CapabilitiesJSON()
+			agent.CardText = card.CardText()
+		}
+
+		mode = "update"
+		if isCreate {
+			mode = "create"
+			if err := tx.CreateAgent(ctx, agent); err != nil {
+				return fmt.Errorf("create agent: %w", err)
+			}
+		} else {
+			if err := tx.UpdateAgent(ctx, agent); err != nil {
+				return fmt.Errorf("update agent: %w", err)
+			}
+		}
+
+		if err := tx.LinkValidationChecksToAgent(ctx, validationID, agent.ID); err != nil {
+			return fmt.Errorf("link checks: %w", err)
+		}
+
+		if err := s.maybeSnapshotWith(ctx, tx, agent.ID, v.CardURL, v.CardHash, v.CardJSON, sourceForMode(mode)); err != nil {
+			return fmt.Errorf("snapshot: %w", err)
+		}
+
+		return nil
+	})
+	if txErr != nil {
+		return model.Agent{}, "", nil, false, txErr
 	}
 
 	agentChecks, err := s.store.GetChecksForAgent(ctx, agent.ID)
@@ -307,13 +317,21 @@ func sourceForMode(mode string) string {
 
 // maybeSnapshot appends a new agent_card_snapshots row only when cardHash
 // differs from the latest stored snapshot (03), then trims to the newest
-// 20.
+// 20. It runs against s.store directly — use maybeSnapshotWith to run
+// inside a transaction.
 func (s *Service) maybeSnapshot(ctx context.Context, agentID, cardURL, cardHash string, cardJSON json.RawMessage, source string) error {
+	return s.maybeSnapshotWith(ctx, s.store, agentID, cardURL, cardHash, cardJSON, source)
+}
+
+// maybeSnapshotWith is maybeSnapshot parameterized over the Store to use,
+// so Register can run it against a transaction (P2-3) while Refresh runs
+// it directly against s.store.
+func (s *Service) maybeSnapshotWith(ctx context.Context, store pg.Store, agentID, cardURL, cardHash string, cardJSON json.RawMessage, source string) error {
 	if cardHash == "" {
 		return nil // no card fetched this run (e.g. L1 failed) — nothing to snapshot
 	}
 
-	latest, err := s.store.LatestSnapshot(ctx, agentID)
+	latest, err := store.LatestSnapshot(ctx, agentID)
 	if err != nil && !pg.IsNotFound(err) {
 		return err
 	}
@@ -330,10 +348,10 @@ func (s *Service) maybeSnapshot(ctx context.Context, agentID, cardURL, cardHash 
 		Source:    source,
 		FetchedAt: time.Now().UTC(),
 	}
-	if err := s.store.CreateSnapshot(ctx, snap); err != nil {
+	if err := store.CreateSnapshot(ctx, snap); err != nil {
 		return err
 	}
-	return s.store.TrimSnapshots(ctx, agentID, 20)
+	return store.TrimSnapshots(ctx, agentID, 20)
 }
 
 // Refresh re-runs the full pipeline against an already-registered agent's
@@ -358,17 +376,13 @@ func (s *Service) Refresh(ctx context.Context, ref string) (model.Agent, []model
 	}
 
 	if pr.Card != nil {
-		agent.Name = pr.Card.Name
+		agent.Name = pr.Card.Name()
 		agent.OwnerName = pr.Card.OwnerName()
 		agent.AgentID = pr.DeclaredAgentID
-		agent.Description = pr.Card.Description
-		skillsJSON, _ := json.Marshal(nonNilSkills(pr.Card.Skills))
+		agent.Description = pr.Card.Description()
+		skillsJSON, _ := json.Marshal(nonNilSkills(pr.Card.Skills()))
 		agent.Skills = skillsJSON
-		caps := pr.Card.Capabilities
-		if len(caps) == 0 {
-			caps = json.RawMessage("{}")
-		}
-		agent.Capabilities = caps
+		agent.Capabilities = pr.Card.CapabilitiesJSON()
 		agent.CardText = pr.Card.CardText()
 		agent.CardURL = pr.CardURL
 		agent.CardHash = pr.CardHash
@@ -380,7 +394,13 @@ func (s *Service) Refresh(ctx context.Context, ref string) (model.Agent, []model
 	}
 
 	agent.VerificationStatus = ValidationResultToAgentStatus(pr.Result)
-	agent.VerifiedAt = &now
+	// verified_at tracks the *last successful* verification (03: "Last
+	// successful pipeline run") — a refresh that fails must not advance it,
+	// or a listing that's actually been failing since date X would keep
+	// showing today's date as if it had just been confirmed live.
+	if pr.Result != db.ValidationFailed {
+		agent.VerifiedAt = &now
+	}
 	agent.UpdatedAt = now
 
 	if err := s.store.UpdateAgent(ctx, agent); err != nil {

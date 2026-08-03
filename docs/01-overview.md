@@ -84,8 +84,8 @@ checks on demand.
 
 ### Programmatic access
 - **MCP server** mounted at `/mcp` — see [06-mcp-interface.md](06-mcp-interface.md).
-- **A2A endpoints** — the registry's own card plus `tasks/send`,
-  `tasks/status` (`tasks/get`), `tasks/cancel` — see
+- **A2A endpoints** — the registry's own card plus `SendMessage`,
+  `GetTask`, `CancelTask` (A2A v1.0.1, official Go SDK) — see
   [07-a2a-interface.md](07-a2a-interface.md).
 
 ## Non-goals (v1)

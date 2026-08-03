@@ -9,7 +9,7 @@ import (
 
 // RequestLogger logs one structured line per request via the sugared zap
 // logger (02).
-func RequestLogger(log *zap.SugaredLogger) gin.HandlerFunc {
+func RequestLogger(log *zap.SugaredLogger, resolver *IPResolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
@@ -20,7 +20,7 @@ func RequestLogger(log *zap.SugaredLogger) gin.HandlerFunc {
 			"path", path,
 			"status", c.Writer.Status(),
 			"duration_ms", time.Since(start).Milliseconds(),
-			"client_ip", ClientIP(c.Request),
+			"client_ip", resolver.FromRequest(c.Request),
 		)
 	}
 }

@@ -307,46 +307,6 @@ func (s *GormStore) TrimSnapshots(ctx context.Context, agentID string, keep int)
 	`, agentID, agentID, keep).Error
 }
 
-// ---- A2A tasks ----
-
-func (s *GormStore) CreateTask(ctx context.Context, t *db.A2ATask) error {
-	return s.db.WithContext(ctx).Create(t).Error
-}
-
-func (s *GormStore) GetTask(ctx context.Context, id string) (*db.A2ATask, error) {
-	var t db.A2ATask
-	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&t).Error; err != nil {
-		return nil, err
-	}
-	return &t, nil
-}
-
-func (s *GormStore) UpdateTask(ctx context.Context, t *db.A2ATask) error {
-	return s.db.WithContext(ctx).Save(t).Error
-}
-
-func (s *GormStore) CASTaskStatus(ctx context.Context, id, fromStatus, toStatus string) (bool, error) {
-	res := s.db.WithContext(ctx).Model(&db.A2ATask{}).
-		Where("id = ? AND status = ?", id, fromStatus).
-		Update("status", toStatus)
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected == 1, nil
-}
-
-func (s *GormStore) ListTasksByStatus(ctx context.Context, status string, limit int) ([]db.A2ATask, error) {
-	var tasks []db.A2ATask
-	q := s.db.WithContext(ctx).Where("status = ?", status).Order("created_at ASC")
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
-	if err := q.Find(&tasks).Error; err != nil {
-		return nil, err
-	}
-	return tasks, nil
-}
-
 // ---- Garbage collection ----
 
 // SweepExpiredValidations deletes validation rows (and their still-linked
@@ -373,15 +333,14 @@ func (s *GormStore) SweepExpiredValidations(ctx context.Context, createdBefore t
 	return res.RowsAffected, nil
 }
 
-func (s *GormStore) SweepTerminalTasks(ctx context.Context, olderThan time.Time) (int64, error) {
-	res := s.db.WithContext(ctx).
-		Where("status IN ? AND updated_at < ?",
-			[]string{db.TaskCompleted, db.TaskFailed, db.TaskCanceled}, olderThan).
-		Delete(&db.A2ATask{})
-	if res.Error != nil {
-		return 0, res.Error
-	}
-	return res.RowsAffected, nil
+// Transaction runs fn against a Store bound to a single DB transaction; an
+// error returned by fn rolls the whole thing back (P2-3). Nested calls
+// (Transaction inside a fn already running in a transaction) reuse the
+// same underlying *gorm.DB, since gorm.Transaction supports that directly.
+func (s *GormStore) Transaction(ctx context.Context, fn func(ctx context.Context, tx Store) error) error {
+	return s.db.WithContext(ctx).Transaction(func(txDB *gorm.DB) error {
+		return fn(ctx, &GormStore{db: txDB})
+	})
 }
 
 // escapeLike escapes ILIKE metacharacters so search input can't inject

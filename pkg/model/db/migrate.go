@@ -15,7 +15,6 @@ func Migrate(gdb *gorm.DB) error {
 		&VerificationCheck{},
 		&Validation{},
 		&AgentCardSnapshot{},
-		&A2ATask{},
 	); err != nil {
 		return fmt.Errorf("automigrate: %w", err)
 	}

@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 )
@@ -23,12 +24,23 @@ type Config struct {
 	ProbeHostAllowlist []string
 	// LogLevel controls zap's logging verbosity (debug|info|warn|error).
 	LogLevel string
+	// TrustedProxyCIDRs is the set of networks whose X-Forwarded-For
+	// header the rate limiter trusts (Traefik sits in front of
+	// registry-api in-cluster). Requests from outside these CIDRs have
+	// their X-Forwarded-For ignored entirely, since an untrusted direct
+	// caller can put anything in that header.
+	TrustedProxyCIDRs []*net.IPNet
 }
 
 const (
 	defaultPort      = "8080"
 	defaultPublicURL = "https://registry.ip402.xyz"
 	defaultLogLevel  = "info"
+	// defaultTrustedProxyCIDRs covers RFC1918 private address space, which
+	// already includes k3s's default flannel pod CIDR (10.42.0.0/16) —
+	// Traefik runs in-cluster, so its connections to registry-api always
+	// originate from one of these ranges.
+	defaultTrustedProxyCIDRs = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 )
 
 // Load reads configuration from the environment. It returns an error when a
@@ -53,6 +65,19 @@ func Load() (*Config, error) {
 				cfg.ProbeHostAllowlist = append(cfg.ProbeHostAllowlist, h)
 			}
 		}
+	}
+
+	trustedRaw := getEnv("REGISTRY_TRUSTED_PROXY_CIDRS", defaultTrustedProxyCIDRs)
+	for _, s := range strings.Split(trustedRaw, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		_, ipnet, err := net.ParseCIDR(s)
+		if err != nil {
+			return nil, fmt.Errorf("REGISTRY_TRUSTED_PROXY_CIDRS: invalid CIDR %q: %w", s, err)
+		}
+		cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, ipnet)
 	}
 
 	return cfg, nil

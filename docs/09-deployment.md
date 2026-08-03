@@ -1,36 +1,32 @@
 # 09 — Build & Deployment (k3s)
 
-Two images, plain Kubernetes manifests managed with **kustomize** (base +
-per-env overlays), targeting a k3s cluster with the built-in **Traefik**
-ingress. Everything needed to deploy lives in this repo under `deploy/`;
-secrets are the only thing that doesn't.
+Two images and a flat set of Kubernetes manifests, targeting a k3s cluster
+with the built-in **Traefik** ingress. Everything needed to deploy lives in
+this repo under `deploy/`; secrets and the operator's node list are the only
+things that don't.
 
 ```
 deploy/
+├── build-and-deploy.sh    # build → import to nodes → apply → rollout
 ├── docker/
 │   ├── api.Dockerfile
 │   └── web.Dockerfile
 └── k8s/
-    ├── base/
-    │   ├── kustomization.yaml
-    │   ├── api-deployment.yaml, api-service.yaml
-    │   ├── web-deployment.yaml, web-service.yaml
-    │   ├── postgres-statefulset.yaml, postgres-service.yaml
-    │   ├── ingress.yaml
-    │   └── configmap.yaml
-    └── overlays/
-        ├── dev/           # 1 replica, small resources, latest tags
-        └── prod/          # pinned tags, resource limits, PDB
+    ├── namespace.yaml
+    ├── postgres.yaml      # Service + StatefulSet
+    ├── api.yaml           # Service + Deployment
+    ├── web.yaml           # Service + Deployment
+    ├── ingress.yaml       # Middleware + Certificate + Ingress
+    └── secret.example.yaml
 ```
 
 ## Images
 
 ### `registry-api` (`api.Dockerfile`)
 
-Multi-stage: `golang:1.25-bookworm` builder (BuildKit cache mounts for
-`GOMODCACHE`/`GOCACHE`) → `gcr.io/distroless/base-debian12:nonroot` runtime.
-Only the static binary and `pkg/config/yaml/` are copied in. Runs as nonroot;
-listens on `:8080` (public) and `:9091` (metrics, never exposed via ingress).
+Multi-stage: `golang:1.26-bookworm` builder → `gcr.io/distroless/static-debian12:nonroot`
+runtime. Only the static binary is copied in (config is env-only). Runs as nonroot;
+listens on `:8080`.
 
 ### `registry-web` (`web.Dockerfile`)
 
@@ -67,9 +63,10 @@ target configured via Secret) for backups.
 
 ## Configuration & secrets
 
-- Non-secret config: `configmap.yaml` → env vars (`REGISTRY_SERVER_PUBLIC_URL`,
-  `REGISTRY_LOG_LEVEL`, rate-limit knobs, probe allowlist — empty in prod).
-- Secrets: a `registry-secrets` Secret providing `DATABASE_URL` (and the
+- Non-secret config: plain env vars on the Deployment (`REGISTRY_PUBLIC_URL`,
+  `REGISTRY_LOG_LEVEL`, `REGISTRY_TRUSTED_PROXY_CIDRS`,
+  `REGISTRY_PROBE_HOST_ALLOWLIST` — empty in prod).
+- Secrets: a `registry-secrets` Secret providing `REGISTRY_DATABASE_URL` (and the
   Postgres password for the StatefulSet). Created out-of-band
   (`kubectl create secret` / SealedSecrets if the cluster has it) — **never
   committed**; `deploy/` contains only a `secret.example.yaml`.
@@ -83,37 +80,38 @@ target configured via Secret) for backups.
   `RollingUpdate maxUnavailable=0`.
 - **Resources** (starting points): api `100m/128Mi → 500m/256Mi`,
   web `50m/32Mi → 200m/64Mi`, postgres `250m/256Mi → 1/1Gi`.
-- **Metrics**: Prometheus scrape annotation on the api pod for `:9091`.
 - **Logs**: zap JSON to stdout; whatever log stack the cluster runs picks
   them up.
 
 ## CI (GitHub Actions)
 
-```
-pr.yml       on PR:   go vet + go test -race  |  pnpm typecheck + lint + build
-release.yml  on tag:  buildx both images (amd64+arm64) → push to GHCR
-                      (ghcr.io/<org>/registry-api, /registry-web)
-```
+No CI is wired up yet. The gates to add first are the ones already run by
+hand on every change: `go vet ./...` + `go test ./... -race`, and
+`pnpm typecheck` + `pnpm build`.
 
-Deploy step for v1 is intentionally manual and cluster-local:
+Deployment for v1 is manual and cluster-local — there is no image registry
+in the loop. `deploy/build-and-deploy.sh [api|web|all]` builds arm64 images,
+`docker save`s them into every node's containerd over ssh, applies the
+manifests for whatever is being deployed, and waits on the rollout:
 
 ```sh
-kubectl apply -k deploy/k8s/overlays/prod
-kubectl set image deploy/registry-api api=ghcr.io/<org>/registry-api:v1.2.3
+./deploy/build-and-deploy.sh all
 ```
 
-GitOps (Flux/Argo watching this repo's overlays) is a drop-in upgrade later
-since the manifests are already kustomize-shaped.
+The node list is operator-specific and never committed: supply it via
+`REGISTRY_K3S_NODES="node1 node2 …"` or a gitignored `deploy/nodes.local`.
+Images are tagged `localhost/agent-registry/{api,web}:<utc-timestamp>` with
+`imagePullPolicy: IfNotPresent`. Moving to a real registry + GitOps
+(Flux/Argo) is a drop-in later change.
 
 ## Local development
 
 ```sh
 docker compose up -d postgres        # compose file with just postgres:17
-make run                             # api on :8080, swagger on /swagger in dev
+make run                             # api on :8080
 cd web && pnpm dev                   # vite on :5173, proxying /v1,/mcp,/a2a to :8080
 ```
 
-A `make e2e` target boots the API against a throwaway Postgres
-(testcontainers), registers a stub A2A agent served by the test itself, and
-asserts the full validate→register→search path — the same stub agent doubles
-as the fixture for verification-pipeline unit tests.
+The verification pipeline's tests stand up a stub A2A agent with
+`httptest.NewTLSServer` and drive L1/L2/L3 against it, so the probe logic is
+covered without a database or network access.

@@ -87,31 +87,80 @@ func (l *Limiter) gcLoop() {
 	}
 }
 
-// ClientIP extracts the caller's IP, preferring the left-most address in
-// X-Forwarded-For since Traefik sits in front of registry-api (02, 04).
-func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if ip := strings.TrimSpace(parts[0]); ip != "" {
-			return ip
-		}
-	}
-	if xr := r.Header.Get("X-Real-IP"); xr != "" {
-		return strings.TrimSpace(xr)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+// IPResolver resolves the real client IP from a request, trusting
+// X-Forwarded-For only when it arrived through a configured trusted-proxy
+// CIDR (Traefik sits in front of registry-api — 02, 04). Without a trust
+// boundary, any direct, untrusted caller can forge X-Forwarded-For and
+// pick whatever bucket its rate limit is billed to; walking the header
+// blindly (the previous implementation) makes the whole limiter
+// trivially bypassable.
+type IPResolver struct {
+	trusted []*net.IPNet
 }
 
-// RateLimit builds gin middleware enforcing l against the caller's IP,
-// responding 429 rate_limited on the uniform error envelope (04) when
-// exceeded.
-func RateLimit(l *Limiter) gin.HandlerFunc {
+// NewIPResolver builds a resolver that trusts X-Forwarded-For only from
+// the given CIDRs (typically the in-cluster network Traefik runs on).
+func NewIPResolver(trusted []*net.IPNet) *IPResolver {
+	return &IPResolver{trusted: trusted}
+}
+
+func (r *IPResolver) isTrusted(ip net.IP) bool {
+	for _, n := range r.trusted {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// Resolve implements the standard trusted-proxy walk: if remoteAddr isn't
+// itself a trusted proxy, X-Forwarded-For is ignored entirely (an
+// untrusted direct connection can put anything in that header). Otherwise
+// it walks X-Forwarded-For from the right, skipping entries that are
+// themselves trusted proxies, and returns the first untrusted entry — the
+// nearest hop to the real client that isn't infrastructure we control.
+func (r *IPResolver) Resolve(remoteAddr, xForwardedFor string) string {
+	remoteHost := remoteAddr
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		remoteHost = h
+	}
+
+	remoteIP := net.ParseIP(remoteHost)
+	if remoteIP == nil || !r.isTrusted(remoteIP) {
+		return remoteHost
+	}
+
+	if xForwardedFor == "" {
+		return remoteHost
+	}
+
+	parts := strings.Split(xForwardedFor, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(parts[i])
+		cip := net.ParseIP(candidate)
+		if cip == nil {
+			continue
+		}
+		if !r.isTrusted(cip) {
+			return candidate
+		}
+	}
+	// Every hop in the chain was itself a trusted proxy (unusual) — fall
+	// back to the left-most entry, the closest thing to an origin we have.
+	return strings.TrimSpace(parts[0])
+}
+
+// FromRequest resolves the client IP for an *http.Request.
+func (r *IPResolver) FromRequest(req *http.Request) string {
+	return r.Resolve(req.RemoteAddr, req.Header.Get("X-Forwarded-For"))
+}
+
+// RateLimit builds gin middleware enforcing l against the caller's IP
+// (resolved via resolver), responding 429 rate_limited on the uniform
+// error envelope (04) when exceeded.
+func RateLimit(l *Limiter, resolver *IPResolver) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ip := ClientIP(c.Request)
+		ip := resolver.FromRequest(c.Request)
 		if !l.Allow(ip) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, model.ErrorResponse{
 				Error: model.ErrorBody{Code: "rate_limited", Message: "too many requests"},

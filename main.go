@@ -20,6 +20,7 @@ import (
 	"github.com/zfdang/agent-registry/pkg/client/pg"
 	"github.com/zfdang/agent-registry/pkg/config"
 	"github.com/zfdang/agent-registry/pkg/mcpserver"
+	"github.com/zfdang/agent-registry/pkg/middleware"
 	"github.com/zfdang/agent-registry/pkg/probe"
 	"github.com/zfdang/agent-registry/pkg/server"
 	"github.com/zfdang/agent-registry/pkg/service"
@@ -53,19 +54,19 @@ func run() error {
 	probeClient := probe.NewClient(probe.WithAllowlist(cfg.ProbeHostAllowlist))
 	svc := service.New(store, probeClient, sugar)
 
-	worker := service.NewTaskWorker(svc)
-	svc.SetWorker(worker)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	worker.Start(ctx)
 	svc.StartGCTicker(ctx)
 
-	engine := server.New(svc, sugar,
-		func(e *gin.Engine) { mcpserver.Mount(e, svc) },
-		func(e *gin.Engine, limiters *server.Limiters) {
-			a2aserver.Mount(e, svc, cfg.PublicURL, limiters.Mutating, limiters.TaskRead)
+	resolver := middleware.NewIPResolver(cfg.TrustedProxyCIDRs)
+
+	engine := server.New(svc, sugar, resolver,
+		func(e *gin.Engine, limiters *server.Limiters, resolver *middleware.IPResolver) {
+			mcpserver.Mount(e, svc, cfg.PublicURL, limiters.Reads, limiters.Mutating, resolver)
+		},
+		func(e *gin.Engine, limiters *server.Limiters, resolver *middleware.IPResolver) {
+			a2aserver.Mount(e, svc, cfg.PublicURL, limiters.Mutating, limiters.TaskRead, resolver)
 		},
 	)
 
