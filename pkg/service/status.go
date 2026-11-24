@@ -14,6 +14,9 @@ func ValidationResultToAgentStatus(result string) string {
 	if result == db.ValidationPassed {
 		return db.StatusVerified
 	}
+	if result == db.ValidationPartial {
+		return db.StatusPartial
+	}
 	return db.StatusFailed
 }
 

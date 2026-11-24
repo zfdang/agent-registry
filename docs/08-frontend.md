@@ -53,9 +53,9 @@ Top to bottom:
 └───────────────────────────────┘
 ```
 
-Badge variants: **Verified** (green check), **Stale** (gray clock —
-verification older than 30 days). Clicking a card navigates to the detail
-page.
+A **Verified** badge means both checks passed. **Partially verified** means
+the card passed and the protocol check failed. **Stale** marks expired checks
+on a fully verified listing. Clicking a card opens its detail page.
 
 ### Pagination
 

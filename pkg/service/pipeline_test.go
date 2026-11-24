@@ -232,8 +232,8 @@ func TestVerifier_L2FailsOnMalformedEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if result.Result != db.ValidationFailed {
-		t.Errorf("result = %q, want failed", result.Result)
+	if result.Result != db.ValidationPartial {
+		t.Errorf("result = %q, want partial", result.Result)
 	}
 	l2 := findCheck(result.Checks, db.CheckL2Protocol)
 	if l2 == nil || l2.Status != db.CheckStatusFailed {
@@ -297,8 +297,8 @@ func TestVerifier_L2FailsWhenMethodNotFoundOnEveryDialect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if result.Result != db.ValidationFailed {
-		t.Errorf("result = %q, want failed", result.Result)
+	if result.Result != db.ValidationPartial {
+		t.Errorf("result = %q, want partial", result.Result)
 	}
 	l2 := findCheck(result.Checks, db.CheckL2Protocol)
 	if l2 == nil || l2.Status != db.CheckStatusFailed {

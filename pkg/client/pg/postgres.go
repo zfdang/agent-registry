@@ -116,15 +116,14 @@ func (s *GormStore) ListAgents(ctx context.Context, p ListParams) ([]db.Agent, i
 	// but a check's expiry can flip the *effective* status to "stale"
 	// purely by the clock, with no write (03 §Freshness). The stored
 	// column therefore never contains "stale" — filtering on it has to
-	// test for live expired checks directly. "failed" takes precedence
-	// over staleness in the roll-up (03 §roll-up), so the stale filter
-	// excludes agents already stored as failed.
+	// test for live expired checks directly. Only fully verified listings
+	// can become stale.
 	const staleExists = `EXISTS (SELECT 1 FROM verification_checks vc WHERE vc.agent_id = agents.id AND vc.expires_at < now())`
 	switch p.Status {
 	case "":
 		// no filter
 	case db.StatusStale:
-		q = q.Where("verification_status != ? AND "+staleExists, db.StatusFailed)
+		q = q.Where("verification_status = ? AND "+staleExists, db.StatusVerified)
 	case db.StatusVerified:
 		q = q.Where("verification_status = ? AND NOT "+staleExists, p.Status)
 	default:

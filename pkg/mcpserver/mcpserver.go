@@ -161,7 +161,7 @@ type searchAgentsArgs struct {
 }
 
 // searchAgentsSchema builds search_agents' input schema (06):
-// query/status/limit/offset, all optional, status enum verified | stale,
+// query/status/limit/offset, all optional, status enum verified | partial | stale,
 // limit 1-50 default 10, offset >=0 default 0.
 func searchAgentsSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
@@ -173,7 +173,7 @@ func searchAgentsSchema() *jsonschema.Schema {
 			},
 			"status": {
 				Type: "string",
-				Enum: []any{"verified", "stale"},
+				Enum: []any{"verified", "partial", "stale"},
 			},
 			"limit": {
 				Type:    "integer",

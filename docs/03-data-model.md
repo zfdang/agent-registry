@@ -43,7 +43,7 @@ One row per listed agent.
 | `card_url` | text | | Exact URL the winning card was fetched from (latest) |
 | `card_hash` | text | | sha256 of the latest card body |
 | `card_json` | jsonb | | **Cache of the latest snapshot** in `agent_card_snapshots`, served by `get_agent_card` without re-probing |
-| `verification_status` | text | not null | `verified` \| `failed` \| `stale` — denormalized roll-up of the live checks |
+| `verification_status` | text | not null | `verified` \| `partial` \| `failed` \| `stale` — denormalized roll-up of the live checks |
 | `verified_at` | timestamptz | | Last successful pipeline run |
 | `created_at` / `updated_at` | timestamptz | not null | |
 
@@ -131,7 +131,7 @@ to echo results back.
 | `id` | text | PK, `val_<uuid>` |
 | `url` | text | The submitted URL (the only user input) |
 | `name`, `owner_name`, `agent_id` | text | **Extracted server-side from the fetched card** during this validation — register copies these, never client-resent values |
-| `result` | text | `passed` \| `failed` |
+| `result` | text | `passed` \| `partial` \| `failed` |
 | `card_url`, `card_hash`, `card_json` | as in `agents` | Carried onto the agent row at register |
 | `consumed_at` | timestamptz | Set when registration uses it; a consumed validation cannot be reused |
 | `created_at` | timestamptz | |
@@ -180,7 +180,8 @@ Recomputed after every pipeline run **and at read time** (expiry can flip it
 without any write):
 
 ```
-l1 failed OR l2 failed            → failed
-any live check expired            → stale
-l1, l2 both passed                → verified
+l1 failed                         → failed
+l1 passed, l2 failed              → partial
+l1 and l2 passed, a check expired → stale
+l1 and l2 passed, checks fresh    → verified
 ```

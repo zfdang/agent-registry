@@ -222,7 +222,7 @@ func (s *Service) Register(ctx context.Context, validationID string) (agentDTO m
 	if now.After(v.ExpiresAt) {
 		return model.Agent{}, "", nil, false, ErrValidationExpired
 	}
-	if v.Result == db.ValidationFailed {
+	if !Registerable(v.Result) {
 		return model.Agent{}, "", nil, false, ErrValidationFailed
 	}
 
@@ -269,7 +269,9 @@ func (s *Service) Register(ctx context.Context, validationID string) (agentDTO m
 		agent.CardHash = v.CardHash
 		agent.CardJSON = v.CardJSON
 		agent.VerificationStatus = ValidationResultToAgentStatus(v.Result)
-		agent.VerifiedAt = &now
+		if v.Result == db.ValidationPassed {
+			agent.VerifiedAt = &now
+		}
 		agent.UpdatedAt = now
 
 		if card != nil {
@@ -406,7 +408,7 @@ func (s *Service) Refresh(ctx context.Context, ref string) (model.Agent, []model
 	// successful pipeline run") — a refresh that fails must not advance it,
 	// or a listing that's actually been failing since date X would keep
 	// showing today's date as if it had just been confirmed live.
-	if pr.Result != db.ValidationFailed {
+	if pr.Result == db.ValidationPassed {
 		agent.VerifiedAt = &now
 	}
 	agent.UpdatedAt = now
