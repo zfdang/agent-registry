@@ -30,7 +30,7 @@ Find agents matching a query.
     "type": "object",
     "properties": {
       "query":     { "type": "string", "description": "One query matched over name, description, owner, skills, agent URL (partial/substring — a bare hostname works), and cached agent-card content. Empty lists newest agents." },
-      "status":    { "type": "string", "enum": ["verified", "stale"] },
+      "status":    { "type": "string", "enum": ["verified", "partial", "stale"] },
       "limit":     { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
       "offset":    { "type": "integer", "minimum": 0, "default": 0 }
     }
@@ -120,7 +120,7 @@ Result:
   "checks": [ … ] }
 ```
 
-On a failed validation: `{ "registered": false, "checks": [...] }` with the
+A valid card with an unsuccessful endpoint probe can be registered with `verification_status: "partial"`. On a failed card validation: `{ "registered": false, "checks": [...] }` with the
 failing check's detail — a tool *result*, not a tool error, so the assistant
 can relay the diagnosis (e.g. "your endpoint didn't answer the JSON-RPC
 probe"). Re-registering an existing URL is not an error; `mode` says what

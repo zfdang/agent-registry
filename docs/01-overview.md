@@ -67,10 +67,10 @@ two checks against the URL:
 | Level | Check | Gating |
 |---|---|---|
 | **L1 — Agent card** | An agent card is discoverable at a well-known path and statically valid; metadata is extracted from it | yes — must pass |
-| **L2 — A2A protocol** | The card's endpoint gives positive evidence it implements an A2A method | yes — must pass |
+| **L2 — A2A protocol** | The card's endpoint gives positive evidence it implements an A2A method | Full verification only |
 
-Only after both pass can the agent be submitted to the registry. The full
-pipeline, including SSRF hardening of the outbound probes, is specified in
+A valid card can be submitted. If its endpoint fails the protocol check,
+the listing is marked Partially verified. The validation pipeline is specified in
 [05-verification.md](05-verification.md).
 
 **The agent URL is the identity anchor.** It is the registry's only

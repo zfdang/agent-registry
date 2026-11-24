@@ -8,6 +8,7 @@ import (
 // VerificationStatus values for Agent.VerificationStatus.
 const (
 	StatusVerified = "verified"
+	StatusPartial  = "partial"
 	StatusFailed   = "failed"
 	StatusStale    = "stale"
 )

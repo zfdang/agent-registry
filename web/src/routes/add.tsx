@@ -31,7 +31,8 @@ function isValidHttpsUrl(value: string): boolean {
 }
 
 function resultToStatus(result: ValidationResult): VerificationStatus {
-  return result === 'passed' ? 'verified' : 'failed'
+  if (result === 'passed') return 'verified'
+  return result
 }
 
 function AddPage() {
@@ -88,11 +89,12 @@ function AddPage() {
       <div className="mx-auto max-w-lg text-center">
         <CheckCircle2 className="mx-auto size-12 text-emerald-600 dark:text-emerald-400" />
         <h1 className="mt-4 text-2xl font-semibold text-slate-900 dark:text-slate-100">
-          {agent.name} is live
+          {agent.name} is registered
         </h1>
         <p className="mt-2 text-slate-500 dark:text-slate-400">
-          Your agent has been registered in the Agent Registry.
+          Your listing is now in the Agent Registry.
         </p>
+        <div className="mt-3"><VerificationBadge status={agent.verification_status} /></div>
         <Link to={agentDetailHref(agent.url)} className="mt-6 inline-block text-brand-600 hover:underline dark:text-brand-400">
           View your listing →
         </Link>
@@ -164,7 +166,7 @@ function AddPage() {
         </div>
       )}
 
-      {validation?.extracted && validation.result !== 'failed' && (
+      {validation?.extracted && validation.registerable && (
         <div>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Preview

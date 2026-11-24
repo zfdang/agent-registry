@@ -18,7 +18,7 @@ const PAGE_SIZE = 18
 type IndexSearch = {
   q?: string
   page?: number
-  status?: 'verified' | 'stale'
+  status?: 'verified' | 'partial' | 'stale'
 }
 
 export const indexRoute = createRoute({
@@ -28,7 +28,7 @@ export const indexRoute = createRoute({
     q: typeof search.q === 'string' && search.q.length > 0 ? search.q : undefined,
     page: Number(search.page) > 0 ? Number(search.page) : 1,
     status:
-      search.status === 'verified' || search.status === 'stale' ? search.status : undefined,
+      search.status === 'verified' || search.status === 'partial' || search.status === 'stale' ? search.status : undefined,
   }),
   component: IndexPage,
 })
@@ -47,7 +47,7 @@ function IndexPage() {
     <div className="flex flex-col gap-8">
       <div className="text-center">
         <h1 className="text-3xl font-semibold text-slate-900 dark:text-slate-100 sm:text-4xl">
-          Discover verified AI agents
+          Discover A2A agents
         </h1>
         <p className="mt-2 text-slate-500 dark:text-slate-400">
           Search the registry by name, skill, owner, URL, or card content.

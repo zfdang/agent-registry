@@ -67,7 +67,7 @@ Query params:
 | `q` | Optional. One query, matched everywhere: full-text + substring over name/description/owner/skills, **partial (substring) match on the agent URL**, and full-text over the cached agent-card content (`card_text`). URL example: `q=ip402.xyz` returns every agent whose `url` contains `ip402.xyz` (e.g. `https://ip402.xyz`, `https://api.ip402.xyz/agent`) |
 | `page` | ≥1, default 1 |
 | `page_size` | 1–100, default 20; out-of-range falls back to default |
-| `status` | Optional filter: `verified` \| `stale` |
+| `status` | Optional filter: `verified` \| `partial` \| `stale` |
 | `sort` | `newest` (default) \| `name` |
 
 ```json
@@ -173,7 +173,7 @@ informational: register reads the values stored on the validation row, not
 anything the client sends back. `extracted` is null when L1 failed (there is
 no card).
 
-`registerable` is simply `result != "failed"`. A URL that is already
+`passed` and `partial` results are registerable. A partial result means the card passed but the A2A endpoint probe did not. A URL that is already
 registered is **not a conflict**: `mode` becomes `"update"` and
 `existing_id` names the row that registration will overwrite (03's upsert
 rule) — the UI shows "this will update the existing listing" with a link.

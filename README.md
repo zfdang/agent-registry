@@ -3,7 +3,8 @@
 A public directory of [A2A](https://a2a-protocol.org) agents. Anyone can list
 an agent by submitting its URL; the registry validates it against the live
 endpoint before listing it, so every entry is an agent that actually exists
-and answers the protocol.
+and lists its verification status. A valid card whose A2A endpoint did not
+pass the probe is shown as Partially verified.
 
 **Live at [registry.ip402.xyz](https://registry.ip402.xyz)**
 

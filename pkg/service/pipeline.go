@@ -35,7 +35,7 @@ type CheckResult struct {
 // the card-derived extraction (nil when L1 failed), and the per-check
 // evidence trail.
 type PipelineResult struct {
-	Result          string // passed | failed
+	Result          string // passed | partial | failed
 	Checks          []CheckResult
 	CardURL         string
 	CardHash        string

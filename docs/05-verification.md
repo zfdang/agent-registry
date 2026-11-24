@@ -14,20 +14,17 @@ result roll-up
 | Check | Gating | Passes when |
 |---|---|---|
 | **L1 `l1_card`** | **yes** | A statically valid agent card is discoverable at a well-known path |
-| **L2 `l2_protocol`** | **yes** | The card's endpoint gives positive evidence it implements an A2A method |
+| **L2 `l2_protocol`** | Full verification only | The card's endpoint gives positive evidence it implements an A2A method |
 
 Roll-up:
 
 ```
-L1 failed or L2 failed        → failed                     (not registerable)
-both passed                   → passed                     (registerable)
+L1 failed                      → failed                    (not registerable)
+L1 passed, L2 failed            → partial                   (registerable)
+both passed                    → passed                    (registerable)
 ```
 
-Both checks gate; there is no advisory tier. (An earlier revision had a
-warning-only "agent ID declared" check between card discovery and the
-protocol probe, but the wild ecosystem answered the question it asked: almost
-no cards declare a registry identifier, so the warning carried no signal and
-was retired. The declared-ID **extraction** survives — see §L1.)
+A valid card is required for a listing. The protocol probe determines whether the listing is fully or partially verified. Declared agent IDs are extracted from the card when available.
 
 ## L1 — Agent card discovery
 

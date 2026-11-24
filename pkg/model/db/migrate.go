@@ -34,6 +34,10 @@ func Migrate(gdb *gorm.DB) error {
 		`UPDATE verification_checks SET kind = 'l2_protocol' WHERE kind = 'l3_protocol'`,
 		`UPDATE agents SET verification_status = 'verified' WHERE verification_status = 'verified_with_warnings'`,
 		`UPDATE validations SET result = 'passed' WHERE result = 'passed_with_warnings'`,
+		`UPDATE agents a SET verification_status = 'partial'
+		  WHERE a.verification_status = 'failed'
+		    AND EXISTS (SELECT 1 FROM verification_checks c WHERE c.agent_id = a.id AND c.kind = 'l1_card' AND c.status = 'passed')
+		    AND EXISTS (SELECT 1 FROM verification_checks c WHERE c.agent_id = a.id AND c.kind = 'l2_protocol' AND c.status = 'failed')`,
 	}
 
 	for _, stmt := range statements {

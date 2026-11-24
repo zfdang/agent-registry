@@ -12,7 +12,7 @@ export interface AgentCapabilities {
   [key: string]: unknown
 }
 
-export type VerificationStatus = 'verified' | 'stale' | 'failed'
+export type VerificationStatus = 'verified' | 'partial' | 'stale' | 'failed'
 
 export interface Agent {
   id: string
@@ -82,7 +82,7 @@ export interface CardHistoryResponse {
   snapshots: CardSnapshot[]
 }
 
-export type ValidationResult = 'passed' | 'failed'
+export type ValidationResult = 'passed' | 'partial' | 'failed'
 
 export interface ExtractedAgent {
   name: string

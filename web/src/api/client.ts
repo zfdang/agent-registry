@@ -60,7 +60,7 @@ export interface ListAgentsParams {
   q?: string
   page?: number
   page_size?: number
-  status?: 'verified' | 'stale'
+  status?: 'verified' | 'partial' | 'stale'
   sort?: 'newest' | 'name'
 }
 

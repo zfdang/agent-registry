@@ -14,7 +14,7 @@ func TestRollupValidationResult(t *testing.T) {
 	}{
 		{"all passed", db.CheckStatusPassed, db.CheckStatusPassed, db.ValidationPassed},
 		{"l1 failed dominates", db.CheckStatusFailed, db.CheckStatusPassed, db.ValidationFailed},
-		{"l2 failed dominates", db.CheckStatusPassed, db.CheckStatusFailed, db.ValidationFailed},
+		{"l2 failed with valid card", db.CheckStatusPassed, db.CheckStatusFailed, db.ValidationPartial},
 		{"l1 failed, l2 never ran", db.CheckStatusFailed, "", db.ValidationFailed},
 	}
 	for _, tt := range tests {
@@ -36,7 +36,8 @@ func TestRollupAgentStatus(t *testing.T) {
 		{"all passed, fresh", db.CheckStatusPassed, db.CheckStatusPassed, false, db.StatusVerified},
 		{"expired flips to stale", db.CheckStatusPassed, db.CheckStatusPassed, true, db.StatusStale},
 		{"failed takes precedence over expired", db.CheckStatusFailed, db.CheckStatusPassed, true, db.StatusFailed},
-		{"l2 failed, fresh", db.CheckStatusPassed, db.CheckStatusFailed, false, db.StatusFailed},
+		{"l2 failed, fresh", db.CheckStatusPassed, db.CheckStatusFailed, false, db.StatusPartial},
+		{"l2 failed, expired", db.CheckStatusPassed, db.CheckStatusFailed, true, db.StatusPartial},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -50,6 +51,9 @@ func TestRollupAgentStatus(t *testing.T) {
 func TestRegisterable(t *testing.T) {
 	if !Registerable(db.ValidationPassed) {
 		t.Error("passed should be registerable")
+	}
+	if !Registerable(db.ValidationPartial) {
+		t.Error("a valid card should be registerable")
 	}
 	if Registerable(db.ValidationFailed) {
 		t.Error("failed should not be registerable")
